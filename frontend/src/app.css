@@ -1,0 +1,108 @@
+/* ---------------------------------------------------------------------
+   Design tokens. Only :root[data-theme] blocks change between themes —
+   the five machine-state colours below are defined once, outside any
+   theme block, and are never touched by the toggle.
+--------------------------------------------------------------------- */
+
+:root {
+  --state-cold: #6b7280;
+  --state-cold-fg: #ffffff;
+  --state-heating: #f59e0b;
+  --state-heating-fg: #1c1c1c;
+  --state-ready: #1d4ed8;
+  --state-ready-fg: #ffffff;
+  --state-baking: #16a34a;
+  --state-baking-fg: #ffffff;
+  --state-error: #dc2626;
+  --state-error-fg: #ffffff;
+
+  --offline-bg: #374151;
+  --offline-fg: #e5e7eb;
+  --offline-border: #94a3b8;
+
+  /* Sidebar is fixed dark navy in both themes (see task layout spec). */
+  --sidebar-bg: #0b1220;
+  --sidebar-fg: #e2e8f0;
+  --sidebar-fg-muted: #94a3b8;
+  --sidebar-active-bg: #1e293b;
+  --sidebar-accent: #38bdf8;
+
+  --danger-bg: #dc2626;
+  --danger-fg: #ffffff;
+
+  /* TV-scale typography: clamp() so a fixed viewport doesn't dictate
+     one physical text size across the 55"-75" range this runs on. */
+  --font-app-title: clamp(1.4rem, 2vw, 2.25rem);
+  --font-next-action: clamp(1.5rem, 2.4vw, 2.75rem);
+  --font-nav-item: clamp(1.05rem, 1.4vw, 1.5rem);
+  --font-toggle: clamp(0.9rem, 1.1vw, 1.15rem);
+  --font-group-header: clamp(1.2rem, 1.7vw, 1.9rem);
+  --font-tile-title: clamp(1.4rem, 2.1vw, 2.5rem);
+  --font-tile-sub: clamp(0.85rem, 1.05vw, 1.15rem);
+  --font-tile-state: clamp(1.05rem, 1.4vw, 1.65rem);
+  --font-tile-time: clamp(0.95rem, 1.2vw, 1.4rem);
+  --font-banner: clamp(1.2rem, 1.7vw, 1.9rem);
+  --font-view-toggle: clamp(0.95rem, 1.15vw, 1.25rem);
+
+  --radius: clamp(8px, 0.6vw, 14px);
+}
+
+:root[data-theme='dark'] {
+  --bg-app: #0f172a;
+  --bg-topbar: #111827;
+  --bg-panel: #1e293b;
+  --bg-tile-list-row: #1a2436;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --border-color: #334155;
+  --accent: #22d3ee;
+  --logo-panel-bg: #ffffff;
+}
+
+:root[data-theme='light'] {
+  --bg-app: #eef2f7;
+  --bg-topbar: #ffffff;
+  --bg-panel: #ffffff;
+  --bg-tile-list-row: #f8fafc;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --border-color: #cbd5e1;
+  --accent: #0e7490;
+  --logo-panel-bg: #ffffff;
+}
+
+/* ---------------------------------------------------------------------
+   Reset + base
+--------------------------------------------------------------------- */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  overflow: hidden;
+}
+
+#app {
+  height: 100vh;
+  width: 100vw;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
