@@ -36,6 +36,7 @@
   let saving = $state(false);
   let saveError = $state('');
   let saveSuccess = $state(false);
+  let showEmptyConfirm = $state(false);
 
   onMount(async () => {
     try {
@@ -110,7 +111,27 @@
     groups = groups.filter((_, i) => i !== index);
   }
 
-  async function save() {
+  function requestSave() {
+    // Saving zero groups clears plc_config.json entirely — destructive
+    // enough (dashboard goes blank until reconfigured) to confirm first,
+    // rather than let a technician nuke the config with one misclick.
+    if (groups.length === 0) {
+      showEmptyConfirm = true;
+      return;
+    }
+    performSave();
+  }
+
+  function cancelEmptyConfirm() {
+    showEmptyConfirm = false;
+  }
+
+  function confirmEmptySave() {
+    showEmptyConfirm = false;
+    performSave();
+  }
+
+  async function performSave() {
     saveError = '';
     saveSuccess = false;
     saving = true;
@@ -286,12 +307,27 @@
       {#if saveSuccess}
         <p class="success">{translate($lang, 'service_config_saved')}</p>
       {/if}
-      <button class="primary" onclick={save} disabled={saving || groups.length === 0}>
+      <button class="primary" onclick={requestSave} disabled={saving}>
         {translate($lang, 'wizard_save_button')}
       </button>
     </footer>
   </div>
 </div>
+
+{#if showEmptyConfirm}
+  <div class="overlay confirm-overlay">
+    <div class="modal confirm-dialog">
+      <h2>{translate($lang, 'wizard_confirm_empty_title')}</h2>
+      <p>{translate($lang, 'wizard_confirm_empty_message')}</p>
+      <div class="form-actions">
+        <button class="secondary" onclick={cancelEmptyConfirm}>{translate($lang, 'cancel')}</button>
+        <button class="primary danger" onclick={confirmEmptySave}>
+          {translate($lang, 'wizard_confirm_button')}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   .overlay {
@@ -594,5 +630,36 @@
     align-items: center;
     justify-content: flex-end;
     gap: clamp(0.75rem, 1.5vw, 1.25rem);
+  }
+
+  .confirm-overlay {
+    z-index: 200;
+  }
+
+  .confirm-dialog {
+    width: min(90vw, 460px);
+    padding: clamp(1.25rem, 2.5vh, 1.75rem);
+    gap: clamp(0.75rem, 1.5vh, 1.1rem);
+  }
+
+  .confirm-dialog h2 {
+    margin: 0;
+    font-size: var(--font-nav-item);
+    color: var(--text-primary);
+  }
+
+  .confirm-dialog p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: var(--font-toggle);
+  }
+
+  .confirm-dialog .form-actions {
+    margin-top: 0.25rem;
+  }
+
+  button.primary.danger {
+    background: var(--danger-bg);
+    color: var(--danger-fg);
   }
 </style>

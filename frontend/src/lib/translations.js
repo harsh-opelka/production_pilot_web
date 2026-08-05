@@ -79,6 +79,10 @@ const en = {
   wizard_no_machines: 'No machines created yet.',
   wizard_remove_button: 'Remove',
   wizard_save_button: 'Save Configuration',
+  wizard_confirm_button: 'Confirm',
+  wizard_confirm_empty_title: 'Remove All Machines?',
+  wizard_confirm_empty_message:
+    'This will remove all machine configuration. The dashboard will show no machines until new ones are configured. Continue?',
 };
 
 // V1's JSON has a couple of stray non-breaking spaces before "…" that
@@ -107,6 +111,10 @@ const de = {
   service_scan_error: 'Netzwerk-Scan fehlgeschlagen: {error}',
   wizard_subnet_label: 'Subnetz',
   wizard_port_label: 'Port',
+  wizard_confirm_button: 'Bestätigen',
+  wizard_confirm_empty_title: 'Alle Maschinen entfernen?',
+  wizard_confirm_empty_message:
+    'Dies entfernt die gesamte Maschinenkonfiguration. Das Dashboard zeigt keine Maschinen an, bis neue konfiguriert werden. Fortfahren?',
 };
 
 export const translations = { en, de };
