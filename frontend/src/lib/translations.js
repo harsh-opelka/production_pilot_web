@@ -27,6 +27,7 @@ const en = {
   connection_lost: 'Connection lost — waiting for OPC UA server',
   theme_dark: 'Dark',
   theme_light: 'Light',
+  display_size: 'Display Size',
 
   // Service tab — reused wherever V1's translations_de.json has a
   // matching key (see the `de` export below), written fresh here since
@@ -98,6 +99,7 @@ const de = {
   next_action_prefix: 'Nächste Aktion:',
   theme_dark: 'Dunkel',
   theme_light: 'Hell',
+  display_size: 'Anzeigegröße',
 
   // Keys V1 never had (no session/rate-limiting concept, and its wizard
   // used native OS message boxes where this web version uses inline

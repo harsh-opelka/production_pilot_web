@@ -40,7 +40,7 @@
   }
 
   .tile.block {
-    height: clamp(220px, 22vh, 260px);
+    height: clamp(13.75rem, 22vh, 16.25rem);
     padding: clamp(0.75rem, 1.5vw, 1.5rem);
     display: flex;
     flex-direction: column;

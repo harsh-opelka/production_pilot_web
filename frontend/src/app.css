@@ -5,6 +5,11 @@
 --------------------------------------------------------------------- */
 
 :root {
+  /* Manual display-scale control (Sidebar "Display Size" slider), 0.7-1.5.
+     Applied to the root font-size below so every rem-based clamp() in the
+     dashboard scales together from this one variable. */
+  --ui-scale: 1;
+
   --state-cold: #6b7280;
   --state-cold-fg: #ffffff;
   --state-heating: #f59e0b;
@@ -44,7 +49,7 @@
   --font-banner: clamp(1.2rem, 1.7vw, 1.9rem);
   --font-view-toggle: clamp(0.95rem, 1.15vw, 1.25rem);
 
-  --radius: clamp(8px, 0.6vw, 14px);
+  --radius: clamp(0.5rem, 0.6vw, 0.875rem);
 }
 
 :root[data-theme='dark'] {
@@ -77,6 +82,13 @@
 
 * {
   box-sizing: border-box;
+}
+
+html {
+  /* Root font-size drives every rem-based clamp() in the dashboard, so
+     --ui-scale (set inline on <html> by App.svelte from the persisted
+     store) scales the whole UI proportionally from this one place. */
+  font-size: calc(100% * var(--ui-scale));
 }
 
 html,

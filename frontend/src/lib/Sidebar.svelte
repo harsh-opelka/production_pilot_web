@@ -1,5 +1,5 @@
 <script>
-  import { page, lang, theme } from './stores.js';
+  import { page, lang, theme, uiScale } from './stores.js';
   import { translate } from './translations.js';
 
   function toggleLang() {
@@ -8,6 +8,10 @@
 
   function toggleTheme() {
     theme.set($theme === 'dark' ? 'light' : 'dark');
+  }
+
+  function onScaleInput(event) {
+    uiScale.set(Number(event.target.value));
   }
 </script>
 
@@ -34,12 +38,29 @@
     <button class="toggle" onclick={toggleTheme} aria-label="Toggle theme">
       {translate($lang, $theme === 'dark' ? 'theme_dark' : 'theme_light')}
     </button>
+
+    <div class="scale-control">
+      <label class="scale-label" for="ui-scale-slider">{translate($lang, 'display_size')}</label>
+      <div class="scale-row">
+        <input
+          id="ui-scale-slider"
+          type="range"
+          min="0.7"
+          max="1.5"
+          step="0.05"
+          value={$uiScale}
+          oninput={onScaleInput}
+          aria-valuetext="{Math.round($uiScale * 100)}%"
+        />
+        <span class="scale-value">{Math.round($uiScale * 100)}%</span>
+      </div>
+    </div>
   </div>
 </nav>
 
 <style>
   .sidebar {
-    width: clamp(160px, 12vw, 220px);
+    width: clamp(10rem, 12vw, 13.75rem);
     flex-shrink: 0;
     height: 100%;
     background: var(--sidebar-bg);
@@ -99,5 +120,38 @@
   .toggle .sep {
     opacity: 0.4;
     margin: 0 0.2em;
+  }
+
+  .scale-control {
+    margin-top: clamp(0.3rem, 0.6vh, 0.5rem);
+    display: flex;
+    flex-direction: column;
+    gap: clamp(0.3rem, 0.5vh, 0.45rem);
+  }
+
+  .scale-label {
+    font-size: var(--font-toggle);
+    color: var(--sidebar-fg-muted);
+  }
+
+  .scale-row {
+    display: flex;
+    align-items: center;
+    gap: clamp(0.5rem, 0.8vw, 0.75rem);
+  }
+
+  .scale-row input[type='range'] {
+    flex: 1;
+    min-width: 0;
+    accent-color: var(--sidebar-accent);
+  }
+
+  .scale-value {
+    font-size: var(--font-toggle);
+    color: var(--sidebar-fg);
+    min-width: 3.5ch;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
   }
 </style>

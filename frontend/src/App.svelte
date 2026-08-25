@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { theme, page } from './lib/stores.js';
+  import { theme, page, uiScale } from './lib/stores.js';
   import { fetchInitialState, connectWebSocket } from './lib/websocket.js';
   import Sidebar from './lib/Sidebar.svelte';
   import TopBar from './lib/TopBar.svelte';
@@ -10,6 +10,10 @@
 
   $effect(() => {
     document.documentElement.dataset.theme = $theme;
+  });
+
+  $effect(() => {
+    document.documentElement.style.setProperty('--ui-scale', $uiScale);
   });
 
   onMount(async () => {

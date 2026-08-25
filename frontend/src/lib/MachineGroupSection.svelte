@@ -36,7 +36,7 @@
 
   .tiles.block {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(clamp(180px, 15vw, 240px), 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(clamp(11.25rem, 15vw, 15rem), 1fr));
     gap: clamp(0.75rem, 1.2vw, 1.5rem);
     align-items: start;
   }

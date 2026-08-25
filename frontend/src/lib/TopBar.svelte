@@ -60,7 +60,7 @@
   }
 
   .logo-panel img {
-    height: clamp(28px, 4vh, 52px);
+    height: clamp(1.75rem, 4vh, 3.25rem);
     width: auto;
   }
 </style>
