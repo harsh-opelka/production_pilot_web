@@ -111,7 +111,6 @@ def _reload_source() -> None:
     next poll cycle picks it up. Called after a Service-tab config save."""
     _set_source(_load_source())
 
-
 def _poll_loop() -> None:
     """
     Runs forever in a daemon thread, one poll every POLL_INTERVAL_SECONDS
