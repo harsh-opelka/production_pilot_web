@@ -22,24 +22,30 @@
 
 <style>
   .topbar {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
     background: var(--bg-topbar);
     border-bottom: 1px solid var(--border-color);
     padding: clamp(0.5rem, 1.2vh, 1rem) clamp(1rem, 2vw, 2rem);
-    gap: clamp(0.75rem, 1.5vw, 1.5rem);
+    gap: clamp(0.5rem, 1vh, 1rem) clamp(0.75rem, 1.5vw, 1.5rem);
     flex-shrink: 0;
   }
 
   .title {
+    flex: 0 0 auto;
     font-size: var(--font-app-title);
     font-weight: 700;
     color: var(--text-primary);
     white-space: nowrap;
   }
 
+  /* flex-basis 16rem (not 0) makes this wrap onto its own full-width row
+     at high --ui-scale instead of being squeezed to a sliver between the
+     non-shrinking title and logo. */
   .next-action {
+    flex: 1 1 16rem;
+    min-width: 0;
     text-align: center;
     font-size: var(--font-next-action);
     font-weight: 700;
@@ -52,11 +58,11 @@
   }
 
   .logo-panel {
+    flex: 0 0 auto;
     background: var(--logo-panel-bg);
     border-radius: var(--radius);
     padding: clamp(0.3rem, 0.6vh, 0.6rem) clamp(0.6rem, 1vw, 1rem);
     display: inline-flex;
-    flex-shrink: 0;
   }
 
   .logo-panel img {
