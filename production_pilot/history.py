@@ -145,6 +145,50 @@ def clear_history() -> int:
     return count
 
 
+def get_available_dates() -> list[str]:
+    """Sorted list of distinct UTC calendar dates (YYYY-MM-DD, taken from
+    the stored timestamp's date portion) that have any rows — lets the
+    frontend's date picker restrict to dates that actually have data."""
+    with _db_lock, _connection() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT substr(timestamp, 1, 10) AS date FROM state_transitions ORDER BY date"
+        ).fetchall()
+    return [row["date"] for row in rows]
+
+
+def get_daily_transitions(date: str) -> list[dict]:
+    """All rows whose UTC date matches `date`, ordered per-PLC by
+    timestamp — the walk order stats.compute_daily_summary() needs."""
+    with _db_lock, _connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, timestamp, group_name, plc_ip, unit_number, old_state, new_state, was_online
+            FROM state_transitions
+            WHERE substr(timestamp, 1, 10) = ?
+            ORDER BY plc_ip, timestamp, id
+            """,
+            (date,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_next_transition_after(plc_ip: str, timestamp: str) -> dict | None:
+    """The chronologically next row for this PLC after `timestamp` — used
+    to close out a day's last transition when it carries into a
+    following day (see stats.compute_daily_summary)."""
+    with _db_lock, _connection() as conn:
+        row = conn.execute(
+            """
+            SELECT timestamp FROM state_transitions
+            WHERE plc_ip = ? AND timestamp > ?
+            ORDER BY timestamp ASC, id ASC
+            LIMIT 1
+            """,
+            (plc_ip, timestamp),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def get_summary() -> dict:
     with _db_lock, _connection() as conn:
         row = conn.execute(

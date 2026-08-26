@@ -29,11 +29,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import uvicorn
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from production_pilot import history, scan_plcs, service_config
+from production_pilot import history, scan_plcs, service_config, stats
 from production_pilot.models import MachineGroup
 from production_pilot.opcua_source import CONFIG_PATH, OpcUaSource
 from production_pilot.serializers import build_state
@@ -266,17 +266,28 @@ def _touch_session(token: str) -> str | None:
         return level
 
 
-async def _authenticate(authorization: str | None) -> tuple[str, str]:
-    """Returns (token, level) for any valid session, regardless of
-    level. Raises 401 if the header is missing/malformed or the token is
-    unknown/expired."""
-    if not authorization or not authorization.startswith("Bearer "):
+def _resolve_level(token: str | None) -> tuple[str, str]:
+    """Raises 401 if `token` is falsy or unknown/expired. Returns
+    (token, level) otherwise."""
+    if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    token = authorization.removeprefix("Bearer ")
     level = _touch_session(token)
     if level is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
     return token, level
+
+
+def _bearer_token(authorization: str | None) -> str | None:
+    if authorization and authorization.startswith("Bearer "):
+        return authorization.removeprefix("Bearer ")
+    return None
+
+
+async def _authenticate(authorization: str | None) -> tuple[str, str]:
+    """Returns (token, level) for any valid session, regardless of
+    level. Raises 401 if the header is missing/malformed or the token is
+    unknown/expired."""
+    return _resolve_level(_bearer_token(authorization))
 
 
 def require_level(min_level: str):
@@ -293,6 +304,26 @@ def require_level(min_level: str):
         if _LEVEL_RANK[level] < required_rank:
             raise HTTPException(status_code=403, detail="Insufficient access level")
         return token
+
+    return dependency
+
+
+def require_level_from_header_or_query(min_level: str):
+    """
+    Same as require_level, but also accepts the token via a `token`
+    query parameter, falling back to it only when there's no Bearer
+    header. Needed for exactly one endpoint: the CSV export, which the
+    frontend reaches via a plain <a href> browser download so the page
+    can rely on normal browser download handling — a plain link can't
+    attach a custom Authorization header the way fetch() can.
+    """
+    required_rank = _LEVEL_RANK[min_level]
+
+    async def dependency(authorization: str | None = Header(default=None), token: str | None = None) -> str:
+        resolved_token, level = _resolve_level(_bearer_token(authorization) or token)
+        if _LEVEL_RANK[level] < required_rank:
+            raise HTTPException(status_code=403, detail="Insufficient access level")
+        return resolved_token
 
     return dependency
 
@@ -565,6 +596,47 @@ def service_clear_history(body: HistoryClearIn, request: Request, _token: str = 
 @app.get("/api/service/history/summary")
 def service_history_summary(_token: str = Depends(require_level("service"))) -> dict:
     return history.get_summary()
+
+
+# ---------------------------------------------------------------------------
+# Statistics screen — daily per-machine summaries aggregated from
+# state_transitions (see production_pilot/stats.py for the actual
+# computation). Available to Management level and above — read-only
+# reporting, not a config/wizard concern like the endpoints above.
+# ---------------------------------------------------------------------------
+
+
+def _validate_date(date: str) -> None:
+    try:
+        datetime.strptime(date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date — expected YYYY-MM-DD")
+
+
+@app.get("/api/stats/daily-summary")
+def stats_daily_summary(date: str | None = None, _token: str = Depends(require_level("management"))) -> dict:
+    date = date or stats.today_local()
+    _validate_date(date)
+    return stats.compute_daily_summary(date)
+
+
+@app.get("/api/stats/available-dates")
+def stats_available_dates(_token: str = Depends(require_level("management"))) -> dict:
+    return {"dates": history.get_available_dates()}
+
+
+@app.get("/api/stats/daily-summary/csv")
+def stats_daily_summary_csv(
+    date: str | None = None, _token: str = Depends(require_level_from_header_or_query("management"))
+) -> Response:
+    date = date or stats.today_local()
+    _validate_date(date)
+    csv_text = stats.to_csv(stats.compute_daily_summary(date))
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="daily-summary-{date}.csv"'},
+    )
 
 
 # Mounted last so it only catches what /api/* and /ws didn't already

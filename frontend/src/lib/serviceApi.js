@@ -96,3 +96,11 @@ export function changePassword(currentPassword, newPassword) {
     body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
   });
 }
+
+export function getAvailableDates() {
+  return serviceFetch('/api/stats/available-dates');
+}
+
+export function getDailySummary(date) {
+  return serviceFetch(`/api/stats/daily-summary?date=${encodeURIComponent(date)}`);
+}

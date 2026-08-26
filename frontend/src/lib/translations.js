@@ -35,6 +35,19 @@ const en = {
   display_size: 'Display Size',
   logout: 'Log out',
 
+  stats_date_label: 'Date',
+  stats_download_csv: 'Download CSV',
+  stats_no_data: 'No data recorded for this date',
+  stats_col_unit: 'Unit',
+  stats_col_ip: 'IP',
+  stats_col_baking: 'Baking',
+  stats_col_ready: 'Ready',
+  stats_col_heating: 'Heating',
+  stats_col_error: 'Error',
+  stats_col_cold: 'Cold',
+  stats_col_offline: 'Offline',
+  stats_col_productivity: 'Productivity',
+
   // Service tab — reused wherever V1's translations_de.json has a
   // matching key (see the `de` export below), written fresh here since
   // V1 only ever shipped German strings.
@@ -108,6 +121,19 @@ const de = {
   theme_light: 'Hell',
   display_size: 'Anzeigegröße',
   logout: 'Abmelden',
+
+  stats_date_label: 'Datum',
+  stats_download_csv: 'CSV herunterladen',
+  stats_no_data: 'Keine Daten für dieses Datum erfasst',
+  stats_col_unit: 'Einheit',
+  stats_col_ip: 'IP',
+  stats_col_baking: 'Backen',
+  stats_col_ready: 'Bereit',
+  stats_col_heating: 'Aufheizen',
+  stats_col_error: 'Fehler',
+  stats_col_cold: 'Kalt',
+  stats_col_offline: 'Offline',
+  stats_col_productivity: 'Produktivität',
 
   // Keys V1 never had (no session/rate-limiting concept, and its wizard
   // used native OS message boxes where this web version uses inline
