@@ -23,7 +23,7 @@ export const theme = persisted('pp_theme', 'dark');
 export const lang = persisted('pp_lang', 'en');
 export const view = persisted('pp_view', 'block');
 
-// Manual display-scale (0.7-1.5), independent per device/browser so a
+// Manual display-scale (0.7-3.0), independent per device/browser so a
 // phone and a wall-mounted TV can each keep their own preferred size.
 export const uiScale = persisted('pp_ui_scale', 1);
 export const page = writable('dashboard');

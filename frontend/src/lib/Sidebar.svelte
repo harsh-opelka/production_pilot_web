@@ -46,7 +46,7 @@
           id="ui-scale-slider"
           type="range"
           min="0.7"
-          max="2.5"
+          max="3.0"
           step="0.05"
           value={$uiScale}
           oninput={onScaleInput}

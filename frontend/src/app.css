@@ -5,17 +5,23 @@
 --------------------------------------------------------------------- */
 
 :root {
-  /* Manual display-scale control (Sidebar "Display Size" slider), 0.7-1.5.
+  /* Manual display-scale control (Sidebar "Display Size" slider), 0.7-3.0.
      Applied to the root font-size below so every rem-based clamp() in the
      dashboard scales together from this one variable. */
   --ui-scale: 1;
+
+  /* Opelka brand blue — READY state, active nav/toggle highlights, and
+     the "Next action" Ready-tier pill. Fixed (not theme-dependent): it's
+     a brand colour, not a UI accent that should shift with light/dark. */
+  --opelka-blue: #05346c;
+  --opelka-blue-fg: #ffffff;
 
   --state-cold: #6b7280;
   --state-cold-fg: #ffffff;
   --state-heating: #f59e0b;
   --state-heating-fg: #1c1c1c;
-  --state-ready: #1d4ed8;
-  --state-ready-fg: #ffffff;
+  --state-ready: var(--opelka-blue);
+  --state-ready-fg: var(--opelka-blue-fg);
   --state-baking: #16a34a;
   --state-baking-fg: #ffffff;
   --state-error: #dc2626;
@@ -25,19 +31,26 @@
   --offline-fg: #e5e7eb;
   --offline-border: #94a3b8;
 
+  /* "Next action" tier backgrounds (TopBar pill). Error/Ready reuse the
+     state colours above; baking-near-completion deliberately does NOT
+     reuse --state-heating's amber — an amber "next action" banner would
+     read as "a machine is heating", not "unload soon", so it gets its
+     own distinct urgent-orange. */
+  --tier-baking-bg: #c2410c;
+  --tier-none-bg: #6b7280;
+
   /* Sidebar is fixed dark navy in both themes (see task layout spec). */
   --sidebar-bg: #0b1220;
   --sidebar-fg: #e2e8f0;
   --sidebar-fg-muted: #94a3b8;
   --sidebar-active-bg: #1e293b;
-  --sidebar-accent: #38bdf8;
+  --sidebar-accent: var(--opelka-blue);
 
   --danger-bg: #dc2626;
   --danger-fg: #ffffff;
 
   /* TV-scale typography: clamp() so a fixed viewport doesn't dictate
      one physical text size across the 55"-75" range this runs on. */
-  --font-app-title: clamp(1.4rem, 2vw, 2.25rem);
   --font-next-action: clamp(1.5rem, 2.4vw, 2.75rem);
   --font-nav-item: clamp(1.05rem, 1.4vw, 1.5rem);
   --font-toggle: clamp(0.9rem, 1.1vw, 1.15rem);
@@ -60,7 +73,7 @@
   --text-primary: #f1f5f9;
   --text-secondary: #94a3b8;
   --border-color: #334155;
-  --accent: #22d3ee;
+  --accent: var(--opelka-blue);
   --logo-panel-bg: #ffffff;
 }
 
@@ -72,7 +85,7 @@
   --text-primary: #0f172a;
   --text-secondary: #475569;
   --border-color: #cbd5e1;
-  --accent: #0e7490;
+  --accent: var(--opelka-blue);
   --logo-panel-bg: #ffffff;
 }
 
@@ -100,13 +113,22 @@ body {
 body {
   background: var(--bg-app);
   color: var(--text-primary);
-  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-family: 'DejaVu Sans', Verdana, Arial, sans-serif;
   overflow: hidden;
 }
 
 #app {
   height: 100vh;
   width: 100vw;
+}
+
+/* Form controls don't inherit font-family from the body by default in
+   most browsers' UA stylesheets — without this, inputs/selects on the
+   Service page and Installation Wizard would fall back to the OS font. */
+input,
+select,
+textarea {
+  font-family: inherit;
 }
 
 button {

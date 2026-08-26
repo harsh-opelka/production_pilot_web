@@ -27,23 +27,34 @@ function buildMessage(key, group, plc, language) {
  * Baking), fall back to the first READY fryer anywhere — it may not be
  * its own group's first slot, e.g. a normal-baking machine with time to
  * spare can outrank a READY sibling within the same group.
+ *
+ * Returns { text, tier } — tier identifies which precedence rule produced
+ * the message ('error' | 'baking' | 'ready' | 'none'), purely so the
+ * caller can pick a display colour; it does not affect which message
+ * gets chosen.
  */
 export function computeNextAction(groups, language) {
   const candidates = groups.filter((g) => g.plcs.length > 0).map((g) => ({ group: g, plc: g.plcs[0] }));
 
   const errorHit = candidates.find((c) => isError(c.plc));
-  if (errorHit) return buildMessage('next_action_error', errorHit.group, errorHit.plc, language);
+  if (errorHit) {
+    return { text: buildMessage('next_action_error', errorHit.group, errorHit.plc, language), tier: 'error' };
+  }
 
   const bakingHit = candidates.find((c) => isNearDoneBaking(c.plc));
-  if (bakingHit) return buildMessage('next_action_unload', bakingHit.group, bakingHit.plc, language);
+  if (bakingHit) {
+    return { text: buildMessage('next_action_unload', bakingHit.group, bakingHit.plc, language), tier: 'baking' };
+  }
 
   const readyHit = candidates.find((c) => isReady(c.plc));
-  if (readyHit) return buildMessage('next_action_load', readyHit.group, readyHit.plc, language);
+  if (readyHit) {
+    return { text: buildMessage('next_action_load', readyHit.group, readyHit.plc, language), tier: 'ready' };
+  }
 
   for (const group of groups) {
     const readyPlc = group.plcs.find(isReady);
-    if (readyPlc) return buildMessage('next_action_load', group, readyPlc, language);
+    if (readyPlc) return { text: buildMessage('next_action_load', group, readyPlc, language), tier: 'ready' };
   }
 
-  return translate(language, 'no_action');
+  return { text: translate(language, 'no_action'), tier: 'none' };
 }

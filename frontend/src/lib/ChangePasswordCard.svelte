@@ -119,7 +119,7 @@
     border: none;
     border-radius: var(--radius);
     background: var(--accent);
-    color: var(--bg-app);
+    color: var(--opelka-blue-fg);
   }
 
   button[type='submit']:disabled {

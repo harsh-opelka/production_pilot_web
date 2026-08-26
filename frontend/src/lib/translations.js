@@ -22,7 +22,7 @@ const en = {
   state_error: 'Error',
   status_offline: 'Offline',
   status_online: 'Online',
-  unit_fryer: 'Fryer',
+  unit_fryer: 'Machine',
   remaining_time_format: '{mins} mins {secs} secs',
   connection_lost: 'Connection lost — waiting for OPC UA server',
   theme_dark: 'Dark',

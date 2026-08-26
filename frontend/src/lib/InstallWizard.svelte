@@ -432,7 +432,7 @@
 
   button.primary {
     background: var(--accent);
-    color: var(--bg-app);
+    color: var(--opelka-blue-fg);
     font-weight: 600;
   }
 

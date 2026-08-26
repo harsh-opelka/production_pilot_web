@@ -56,8 +56,8 @@
   }
 
   .view-toggle button.active {
-    background: var(--accent);
-    color: var(--bg-app);
+    background: var(--opelka-blue);
+    color: var(--opelka-blue-fg);
     font-weight: 600;
   }
 

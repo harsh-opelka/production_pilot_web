@@ -4,15 +4,13 @@
   import { translate } from './translations.js';
   import { computeNextAction } from './nextAction.js';
 
-  let nextActionText = $derived(computeNextAction($machinesState.groups, $lang));
+  let nextAction = $derived(computeNextAction($machinesState.groups, $lang));
 </script>
 
 <header class="topbar">
-  <div class="title">Produktionspilot</div>
-
   <div class="next-action">
     <span class="prefix">{translate($lang, 'next_action_prefix')}</span>
-    <span class="value">{nextActionText}</span>
+    <span class="pill tier-{nextAction.tier}">{nextAction.text}</span>
   </div>
 
   <div class="logo-panel">
@@ -25,6 +23,7 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
+    justify-content: space-between;
     background: var(--bg-topbar);
     border-bottom: 1px solid var(--border-color);
     padding: clamp(0.5rem, 1.2vh, 1rem) clamp(1rem, 2vw, 2rem);
@@ -32,29 +31,51 @@
     flex-shrink: 0;
   }
 
-  .title {
-    flex: 0 0 auto;
-    font-size: var(--font-app-title);
-    font-weight: 700;
-    color: var(--text-primary);
-    white-space: nowrap;
-  }
-
   /* flex-basis 16rem (not 0) makes this wrap onto its own full-width row
-     at high --ui-scale instead of being squeezed to a sliver between the
-     non-shrinking title and logo. */
+     at high --ui-scale instead of being squeezed to a sliver next to the
+     non-shrinking logo. Its own children (label, pill) wrap onto separate
+     lines too if they don't both fit — see .pill below. */
   .next-action {
     flex: 1 1 16rem;
     min-width: 0;
-    text-align: center;
-    font-size: var(--font-next-action);
-    font-weight: 700;
-    color: var(--accent);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: clamp(0.4rem, 0.8vw, 0.75rem);
   }
 
-  .next-action .prefix {
-    opacity: 0.75;
-    margin-right: 0.4em;
+  .prefix {
+    flex: 0 0 auto;
+    font-size: var(--font-next-action);
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  .pill {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: break-word;
+    font-size: var(--font-next-action);
+    font-weight: 700;
+    color: #ffffff;
+    padding: clamp(0.15rem, 0.4vh, 0.35rem) clamp(0.6rem, 1.2vw, 1rem);
+    border-radius: var(--radius);
+  }
+
+  .tier-error {
+    background: var(--state-error);
+  }
+
+  .tier-baking {
+    background: var(--tier-baking-bg);
+  }
+
+  .tier-ready {
+    background: var(--opelka-blue);
+  }
+
+  .tier-none {
+    background: var(--tier-none-bg);
   }
 
   .logo-panel {

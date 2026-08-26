@@ -94,9 +94,17 @@
     color: var(--text-primary);
   }
 
+  /* A pill, not bare coloured text: --accent is now a dark brand blue, so
+     plain text in that colour would be nearly unreadable directly on the
+     (also dark) panel background in dark theme — same fix as the tier
+     pills in TopBar. */
   .notice {
     margin: 0;
-    color: var(--accent);
+    display: inline-block;
+    background: var(--accent);
+    color: var(--opelka-blue-fg);
+    padding: 0.3em 0.6em;
+    border-radius: var(--radius);
     font-size: var(--font-toggle);
   }
 
@@ -114,7 +122,7 @@
     border: none;
     border-radius: var(--radius);
     background: var(--accent);
-    color: var(--bg-app);
+    color: var(--opelka-blue-fg);
   }
 
   button[type='submit']:disabled {
