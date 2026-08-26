@@ -47,6 +47,16 @@ const en = {
   stats_col_cold: 'Cold',
   stats_col_offline: 'Offline',
   stats_col_productivity: 'Productivity',
+  stats_view_snapshot: 'Snapshot',
+  stats_view_trend: 'Trend',
+  stats_range_start: 'Start Date',
+  stats_range_end: 'End Date',
+  stats_axis_minutes: 'Minutes',
+  stats_metric_baking: 'Baking',
+  stats_metric_waiting: 'Waiting',
+  stats_metric_error: 'Error',
+  stats_metric_productivity: 'Productivity',
+  stats_output_note: 'Output/production count requires additional PLC data not yet available.',
 
   // Service tab — reused wherever V1's translations_de.json has a
   // matching key (see the `de` export below), written fresh here since
@@ -134,6 +144,16 @@ const de = {
   stats_col_cold: 'Kalt',
   stats_col_offline: 'Offline',
   stats_col_productivity: 'Produktivität',
+  stats_view_snapshot: 'Momentaufnahme',
+  stats_view_trend: 'Trend',
+  stats_range_start: 'Startdatum',
+  stats_range_end: 'Enddatum',
+  stats_axis_minutes: 'Minuten',
+  stats_metric_baking: 'Backen',
+  stats_metric_waiting: 'Wartezeit',
+  stats_metric_error: 'Fehler',
+  stats_metric_productivity: 'Produktivität',
+  stats_output_note: 'Die Ausbringungs-/Stückzahlerfassung erfordert zusätzliche PLC-Daten, die noch nicht verfügbar sind.',
 
   // Keys V1 never had (no session/rate-limiting concept, and its wizard
   // used native OS message boxes where this web version uses inline

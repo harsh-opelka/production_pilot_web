@@ -104,3 +104,7 @@ export function getAvailableDates() {
 export function getDailySummary(date) {
   return serviceFetch(`/api/stats/daily-summary?date=${encodeURIComponent(date)}`);
 }
+
+export function getRangeSummary(start, end) {
+  return serviceFetch(`/api/stats/range-summary?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
+}

@@ -617,12 +617,34 @@ def _validate_date(date: str) -> None:
 def stats_daily_summary(date: str | None = None, _token: str = Depends(require_level("management"))) -> dict:
     date = date or stats.today_local()
     _validate_date(date)
-    return stats.compute_daily_summary(date)
+    # Left-joined against the currently configured PLC list so every
+    # configured machine gets a row (00:00 / 0.0% if nothing's been
+    # logged for it yet) instead of silently vanishing — see
+    # with_all_configured_machines' docstring for why this isn't done
+    # inside compute_daily_summary itself (range-summary/Trend needs the
+    # un-joined, possibly-empty result to plot honest gaps).
+    return stats.with_all_configured_machines(stats.compute_daily_summary(date))
 
 
 @app.get("/api/stats/available-dates")
 def stats_available_dates(_token: str = Depends(require_level("management"))) -> dict:
     return {"dates": history.get_available_dates()}
+
+
+MAX_RANGE_DAYS = 90
+
+
+@app.get("/api/stats/range-summary")
+def stats_range_summary(start: str, end: str, _token: str = Depends(require_level("management"))) -> dict:
+    _validate_date(start)
+    _validate_date(end)
+    start_date = datetime.strptime(start, "%Y-%m-%d").date()
+    end_date = datetime.strptime(end, "%Y-%m-%d").date()
+    if start_date > end_date:
+        raise HTTPException(status_code=400, detail="start must be on or before end")
+    if (end_date - start_date).days + 1 > MAX_RANGE_DAYS:
+        raise HTTPException(status_code=400, detail=f"Range too large — max {MAX_RANGE_DAYS} days")
+    return stats.compute_range_summary(start, end)
 
 
 @app.get("/api/stats/daily-summary/csv")
@@ -631,7 +653,9 @@ def stats_daily_summary_csv(
 ) -> Response:
     date = date or stats.today_local()
     _validate_date(date)
-    csv_text = stats.to_csv(stats.compute_daily_summary(date))
+    # Same left-join as the JSON endpoint, so the CSV export matches what
+    # the on-screen table shows for the same date.
+    csv_text = stats.to_csv(stats.with_all_configured_machines(stats.compute_daily_summary(date)))
     return Response(
         content=csv_text,
         media_type="text/csv",

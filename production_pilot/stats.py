@@ -37,9 +37,11 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 from datetime import datetime, timedelta, timezone
 
 from . import history
+from .opcua_source import CONFIG_PATH
 
 _SECONDS_KEYS = (
     "baking_seconds",
@@ -137,6 +139,90 @@ def compute_daily_summary(date: str) -> dict:
 
     machines.sort(key=lambda m: (m["group_name"], m["unit_number"]))
     return {"date": date, "machines": machines}
+
+
+_ZERO_TOTALS = {key: 0 for key in _SECONDS_KEYS}
+
+
+def _load_configured_plcs() -> list[dict]:
+    """Direct, read-only parse of plc_config.json — deliberately NOT via
+    OpcUaSource (constructing/using that opens real OPC UA connections,
+    which would make a stats-page request block on unreachable PLCs).
+    Mirrors OpcUaSource._load_config's unit_number convention (1-based
+    index within each machine's plcs array) so labels line up with the
+    live dashboard. Returns [] if unconfigured or the file is missing/
+    corrupt — a fresh install just shows an empty table, not an error."""
+    if not CONFIG_PATH.exists():
+        return []
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return []
+
+    plcs = []
+    for machine in data.get("machines", []):
+        for index, ip in enumerate(machine.get("plcs", [])):
+            plcs.append({"group_name": machine["name"], "plc_ip": ip, "unit_number": index + 1})
+    return plcs
+
+
+def with_all_configured_machines(summary: dict) -> dict:
+    """
+    Left-joins a compute_daily_summary() result against the CURRENTLY
+    configured PLC list, so every configured machine gets a row — an
+    all-zero one (00:00 everywhere, 0.0% productivity) if it has no
+    state_transitions rows for that date yet, instead of silently not
+    appearing. group_name/unit_number are taken from the current config
+    for every row (not from historical transition data), so a
+    zero-default row and a real-data row for the same PLC never disagree
+    about its current name/position.
+
+    Deliberately NOT folded into compute_daily_summary itself:
+    compute_range_summary (and the Trend charts) rely on a day's
+    machines list being genuinely EMPTY to mean "no data recorded that
+    day" so it can plot an honest gap rather than a false zero — see
+    compute_range_summary's docstring. Only the single-day
+    /api/stats/daily-summary (+ its CSV export) applies this; the range
+    endpoint calls compute_daily_summary directly and keeps its original
+    behaviour.
+
+    If nothing is configured at all (a fresh/unconfigured install),
+    returns an empty machines list — the frontend's "No data recorded"
+    empty state is reserved for that case, not for "configured but
+    nothing logged yet".
+    """
+    configured = _load_configured_plcs()
+    if not configured:
+        return {"date": summary["date"], "machines": []}
+
+    by_ip = {m["plc_ip"]: m for m in summary["machines"]}
+    machines = []
+    for plc in configured:
+        existing = by_ip.get(plc["plc_ip"])
+        base = existing if existing is not None else {**_ZERO_TOTALS, "productivity_pct": 0.0}
+        machines.append({**base, "group_name": plc["group_name"], "plc_ip": plc["plc_ip"], "unit_number": plc["unit_number"]})
+
+    machines.sort(key=lambda m: (m["group_name"], m["unit_number"]))
+    return {"date": summary["date"], "machines": machines}
+
+
+def compute_range_summary(start: str, end: str) -> dict:
+    """One compute_daily_summary() call per day in [start, end] (inclusive)
+    — the exact same per-day computation as the single-date endpoint, not
+    a separate implementation. Callers (server.py) are responsible for
+    validating start <= end and the 90-day range cap before calling this;
+    it just walks whatever range it's given."""
+    start_date = datetime.strptime(start, "%Y-%m-%d").date()
+    end_date = datetime.strptime(end, "%Y-%m-%d").date()
+
+    days = []
+    current = start_date
+    while current <= end_date:
+        days.append(compute_daily_summary(current.strftime("%Y-%m-%d")))
+        current += timedelta(days=1)
+
+    return {"start": start, "end": end, "days": days}
 
 
 def to_csv(summary: dict) -> str:
