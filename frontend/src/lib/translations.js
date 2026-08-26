@@ -6,8 +6,13 @@ import de_v1 from './translations_de.json';
 // instead of re-translating what already exists.
 const en = {
   nav_dashboard: 'Dashboard',
+  nav_statistics: 'Statistics',
   nav_service: 'Service',
   coming_soon: 'Coming soon',
+  gear_tooltip: 'Access',
+  auth_gate_title: 'Access Required',
+  auth_gate_prompt: 'Enter password:',
+  auth_gate_incorrect: 'Incorrect password.',
   block_view: 'Block View',
   list_view: 'List View',
   next_action_prefix: 'Next action:',
@@ -28,6 +33,7 @@ const en = {
   theme_dark: 'Dark',
   theme_light: 'Light',
   display_size: 'Display Size',
+  logout: 'Log out',
 
   // Service tab — reused wherever V1's translations_de.json has a
   // matching key (see the `de` export below), written fresh here since
@@ -45,15 +51,11 @@ const en = {
   service_new_password: 'New Password',
   service_confirm_password: 'Confirm New Password',
   service_save: 'Save',
-  service_password_title: 'Service — Password Required',
-  service_password_prompt: 'Enter service password:',
-  service_password_incorrect: 'Incorrect password.',
   service_password_current_incorrect: 'The current password is incorrect.',
   service_password_empty: 'The new password must not be empty.',
   service_password_mismatch: 'New password and confirmation do not match.',
   service_password_updated: 'Password updated successfully.',
   service_too_many_attempts: 'Too many attempts. Please try again later.',
-  service_session_expired: 'Session expired. Please log in again.',
   service_config_saved: 'Configuration saved.',
   service_config_save_failed: 'Could not save configuration: {error}',
   service_scan_error: 'Network scan failed: {error}',
@@ -96,10 +98,16 @@ const de = {
   // explicitly writes without — use the exact string requested here.
   connection_lost: 'Verbindung unterbrochen — warte auf OPC-UA-Server',
   coming_soon: 'Demnächst verfügbar',
+  nav_statistics: 'Statistik',
+  gear_tooltip: 'Zugang',
+  auth_gate_title: 'Zugang erforderlich',
+  auth_gate_prompt: 'Passwort eingeben:',
+  auth_gate_incorrect: 'Falsches Passwort.',
   next_action_prefix: 'Nächste Aktion:',
   theme_dark: 'Dunkel',
   theme_light: 'Hell',
   display_size: 'Anzeigegröße',
+  logout: 'Abmelden',
 
   // Keys V1 never had (no session/rate-limiting concept, and its wizard
   // used native OS message boxes where this web version uses inline
@@ -107,7 +115,6 @@ const de = {
   close: 'Schließen',
   back: 'Zurück',
   service_too_many_attempts: 'Zu viele Versuche. Bitte später erneut versuchen.',
-  service_session_expired: 'Sitzung abgelaufen. Bitte erneut anmelden.',
   service_config_saved: 'Konfiguration gespeichert.',
   service_config_save_failed: 'Konfiguration konnte nicht gespeichert werden: {error}',
   service_scan_error: 'Netzwerk-Scan fehlgeschlagen: {error}',

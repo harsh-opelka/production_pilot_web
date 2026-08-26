@@ -1,5 +1,5 @@
 import { get } from 'svelte/store';
-import { serviceToken, serviceSessionExpired } from './stores.js';
+import { auth } from './stores.js';
 
 export class ServiceApiError extends Error {
   constructor(message, status) {
@@ -9,13 +9,14 @@ export class ServiceApiError extends Error {
 }
 
 /**
- * Fetch wrapper for every /api/service/* call except login. Attaches the
- * current token, and on a 401 clears it — the session is gone (expired
- * or the server restarted), so the UI must drop back to the login
- * prompt rather than keep pretending it's still authenticated.
+ * Fetch wrapper for every protected call except login. Attaches the
+ * current token, and on a 401 clears the auth store — the session is
+ * gone (expired or the server restarted), so the UI must drop back to
+ * the unauthenticated Production view rather than keep pretending it's
+ * still authorized (see App.svelte's $effect on $auth.token).
  */
 async function serviceFetch(path, options = {}) {
-  const token = get(serviceToken);
+  const { token } = get(auth);
   const headers = { ...(options.headers || {}) };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   if (options.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
@@ -30,11 +31,7 @@ async function serviceFetch(path, options = {}) {
   }
 
   if (res.status === 401) {
-    // Only a *previously valid* token expiring counts as a session
-    // timeout — login() itself hits this same 401 path on a wrong
-    // password, while there was never a token to begin with.
-    if (get(serviceToken) !== null) serviceSessionExpired.set(true);
-    serviceToken.set(null);
+    auth.set({ token: null, level: null });
     throw new ServiceApiError(data?.detail ?? 'Not authenticated', 401);
   }
 
@@ -45,16 +42,34 @@ async function serviceFetch(path, options = {}) {
   return data;
 }
 
+/**
+ * Not routed through serviceFetch: there's no token yet to attach, and a
+ * 401 here means "wrong password", not "your session expired" — the
+ * caller (AuthGate) handles that distinction itself.
+ */
 export async function login(password) {
-  const data = await serviceFetch('/api/service/login', {
+  const res = await fetch('/api/service/login', {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ password }),
   });
-  serviceToken.set(data.token);
+
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    // handled by !res.ok below
+  }
+
+  if (!res.ok) {
+    throw new ServiceApiError(data?.detail ?? `Request failed (${res.status})`, res.status);
+  }
+
+  auth.set({ token: data.token, level: data.level });
 }
 
 export function logout() {
-  serviceToken.set(null);
+  auth.set({ token: null, level: null });
 }
 
 export function scanNetwork(subnet, port) {

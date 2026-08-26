@@ -33,7 +33,8 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket,
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from production_pilot import scan_plcs, service_config
+from production_pilot import history, scan_plcs, service_config
+from production_pilot.models import MachineGroup
 from production_pilot.opcua_source import CONFIG_PATH, OpcUaSource
 from production_pilot.serializers import build_state
 
@@ -111,6 +112,43 @@ def _reload_source() -> None:
     next poll cycle picks it up. Called after a Service-tab config save."""
     _set_source(_load_source())
 
+
+# ---------------------------------------------------------------------------
+# History (KPI) logging — change detection only, no lock needed: this dict
+# is only ever touched from the poll thread itself, never from a request
+# handler. Kept up to date regardless of the recording toggle (see
+# _detect_and_log_transitions) so turning recording back on later compares
+# against real data instead of stale pre-toggle state.
+# ---------------------------------------------------------------------------
+
+_last_known: dict[str, tuple[str, str, bool]] = {}  # plc.ip -> (group_name, state.name, is_online)
+
+
+def _detect_and_log_transitions(groups: list[MachineGroup]) -> None:
+    for group in groups:
+        for plc in group.plcs:
+            current = (group.name, plc.state.name, plc.is_online)
+            previous = _last_known.get(plc.ip)
+            if previous == current:
+                continue
+
+            if history.is_recording_enabled():
+                try:
+                    history.record_transition(
+                        group_name=group.name,
+                        plc_ip=plc.ip,
+                        unit_number=plc.unit_number,
+                        old_state=previous[1] if previous else None,
+                        new_state=plc.state.name,
+                        was_online=plc.is_online,
+                    )
+                except Exception as exc:
+                    # A DB hiccup must never take the poll loop down with it.
+                    print(f"[history] failed to record transition for {plc.ip}: {exc}")
+
+            _last_known[plc.ip] = current
+
+
 def _poll_loop() -> None:
     """
     Runs forever in a daemon thread, one poll every POLL_INTERVAL_SECONDS
@@ -126,6 +164,7 @@ def _poll_loop() -> None:
             try:
                 groups = source.get_machines()
                 connected = source.is_connected()
+                _detect_and_log_transitions(groups)
                 _set_state(build_state(groups, connected))
             except Exception as exc:
                 print(f"[poll] cycle failed: {exc}")
@@ -188,44 +227,74 @@ async def _broadcast_loop() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Service-tab session auth. Tokens live only in memory — lost on
-# restart, which is fine, a technician just logs in again. Every
-# state-changing Service endpoint depends on require_session; the
-# read-only dashboard endpoints above stay open (see module docstring
-# on why a frontend-only password check isn't real protection).
+# Two-tier session auth (Management / Service). Tokens live only in
+# memory — lost on restart, which is fine, a technician just logs in
+# again. "service" is the stronger level: it can do everything
+# "management" can, plus the wizard/config/scan/recording/history
+# endpoints (see require_level below). The read-only dashboard endpoints
+# above stay open to everyone (see module docstring on why a frontend-
+# only password check isn't real protection).
 # ---------------------------------------------------------------------------
 
+_LEVEL_RANK = {"management": 1, "service": 2}
+
 _sessions_lock = threading.Lock()
-_sessions: dict[str, float] = {}  # token -> expiry (time.monotonic())
+_sessions: dict[str, tuple[float, str]] = {}  # token -> (expiry (time.monotonic()), level)
 
 
-def _create_session() -> str:
+def _create_session(level: str) -> str:
     token = secrets.token_urlsafe(32)
     with _sessions_lock:
-        _sessions[token] = time.monotonic() + SESSION_TTL_SECONDS
+        _sessions[token] = (time.monotonic() + SESSION_TTL_SECONDS, level)
     return token
 
 
-def _touch_session(token: str) -> bool:
-    """Validates and slides the session's expiry forward. Returns False,
-    without mutating anything, if the token is unknown or expired."""
+def _touch_session(token: str) -> str | None:
+    """Validates and slides the session's expiry forward. Returns the
+    session's level, or None (without mutating anything) if the token is
+    unknown or expired."""
     now = time.monotonic()
     with _sessions_lock:
-        expiry = _sessions.get(token)
-        if expiry is None or expiry < now:
+        entry = _sessions.get(token)
+        if entry is None:
+            return None
+        expiry, level = entry
+        if expiry < now:
             _sessions.pop(token, None)
-            return False
-        _sessions[token] = now + SESSION_TTL_SECONDS
-        return True
+            return None
+        _sessions[token] = (now + SESSION_TTL_SECONDS, level)
+        return level
 
 
-async def require_session(authorization: str | None = Header(default=None)) -> str:
+async def _authenticate(authorization: str | None) -> tuple[str, str]:
+    """Returns (token, level) for any valid session, regardless of
+    level. Raises 401 if the header is missing/malformed or the token is
+    unknown/expired."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Not authenticated")
     token = authorization.removeprefix("Bearer ")
-    if not _touch_session(token):
+    level = _touch_session(token)
+    if level is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    return token
+    return token, level
+
+
+def require_level(min_level: str):
+    """
+    Dependency factory: require_level("management") passes for both
+    management and service tokens; require_level("service") passes only
+    for service tokens (see _LEVEL_RANK — service outranks management).
+    Usage: `_token: str = Depends(require_level("service"))`.
+    """
+    required_rank = _LEVEL_RANK[min_level]
+
+    async def dependency(authorization: str | None = Header(default=None)) -> str:
+        token, level = await _authenticate(authorization)
+        if _LEVEL_RANK[level] < required_rank:
+            raise HTTPException(status_code=403, detail="Insufficient access level")
+        return token
+
+    return dependency
 
 
 # ---------------------------------------------------------------------------
@@ -282,8 +351,17 @@ class PasswordChangeIn(BaseModel):
     new_password: str
 
 
+class RecordingIn(BaseModel):
+    enabled: bool
+
+
+class HistoryClearIn(BaseModel):
+    confirm: bool
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    history.init_db()
     _set_source(_load_source())
     poll_thread = threading.Thread(target=_poll_loop, daemon=True, name="opcua-poll")
     poll_thread.start()
@@ -327,8 +405,9 @@ async def ws_endpoint(websocket: WebSocket) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Service endpoints — everything below except login requires a valid
-# session token (see require_session above).
+# Service endpoints — everything below except login and /api/auth/level
+# requires a session token of at least the given level (see require_level
+# above). Every endpoint here specifically requires "service".
 # ---------------------------------------------------------------------------
 
 
@@ -336,12 +415,24 @@ async def ws_endpoint(websocket: WebSocket) -> None:
 def service_login(body: LoginRequest, request: Request) -> dict:
     ip = request.client.host if request.client else "unknown"
     _check_rate_limit(ip)
-    if not service_config.verify_password(body.password):
+    level = service_config.verify_password(body.password)
+    if level is None:
         _record_failed_login(ip)
         # Generic message — never hint at whether the password was close
         # or reveal anything about the stored credential.
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    return {"token": _create_session()}
+    return {"token": _create_session(level), "level": level}
+
+
+@app.get("/api/auth/level")
+async def auth_level(authorization: str | None = Header(default=None)) -> dict:
+    """Given a valid token (either level), returns its level. login()
+    already returns the level directly, so the frontend's primary path
+    doesn't need this — it exists for a client that only has a token in
+    hand and needs to (re)confirm what it's authorized for. Accepts
+    either level."""
+    _token, level = await _authenticate(authorization)
+    return {"level": level}
 
 
 def _validate_subnet(subnet: str) -> ipaddress.IPv4Network | ipaddress.IPv6Network:
@@ -370,7 +461,7 @@ def _run_full_scan(subnet: str, port: int) -> list[dict]:
 
 
 @app.post("/api/service/scan")
-async def service_scan(body: ScanRequest, _token: str = Depends(require_session)) -> dict:
+async def service_scan(body: ScanRequest, _token: str = Depends(require_level("service"))) -> dict:
     network = _validate_subnet(body.subnet)
     if not (1 <= body.port <= 65535):
         raise HTTPException(status_code=400, detail="Invalid port")
@@ -385,7 +476,7 @@ async def service_scan(body: ScanRequest, _token: str = Depends(require_session)
 
 
 @app.get("/api/service/config")
-def service_get_config(_token: str = Depends(require_session)) -> dict:
+def service_get_config(_token: str = Depends(require_level("service"))) -> dict:
     if not CONFIG_PATH.exists():
         return {"machines": []}
     try:
@@ -418,7 +509,7 @@ def _validate_config(config: ConfigIn) -> None:
 
 
 @app.post("/api/service/config")
-def service_save_config(body: ConfigIn, _token: str = Depends(require_session)) -> dict:
+def service_save_config(body: ConfigIn, _token: str = Depends(require_level("service"))) -> dict:
     _validate_config(body)
     data = {"machines": [m.model_dump() for m in body.machines]}
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -429,13 +520,51 @@ def service_save_config(body: ConfigIn, _token: str = Depends(require_session)) 
 
 
 @app.post("/api/service/password")
-def service_change_password(body: PasswordChangeIn, _token: str = Depends(require_session)) -> dict:
-    if not service_config.verify_password(body.current_password):
+def service_change_password(body: PasswordChangeIn, _token: str = Depends(require_level("service"))) -> dict:
+    # Only the Service password itself gates this — a Management-level
+    # credential passed as current_password must not count as a match.
+    if not service_config.verify_service_password(body.current_password):
         raise HTTPException(status_code=401, detail="Current password is incorrect")
     if not body.new_password:
         raise HTTPException(status_code=400, detail="New password must not be empty")
-    service_config.set_password(body.new_password)
+    service_config.set_service_password(body.new_password)
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# History (KPI) logging controls. Data-capture only for now — no
+# viewing/aggregation endpoints yet, just enable/disable, wipe, and enough
+# of a summary to confirm rows are actually landing. All Service-level, so
+# all four require a session same as the endpoints above.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/service/recording-status")
+def service_recording_status(_token: str = Depends(require_level("service"))) -> dict:
+    return {"enabled": history.is_recording_enabled()}
+
+
+@app.post("/api/service/recording")
+def service_set_recording(body: RecordingIn, request: Request, _token: str = Depends(require_level("service"))) -> dict:
+    history.set_recording_enabled(body.enabled)
+    ip = request.client.host if request.client else "unknown"
+    print(f"[history] recording {'enabled' if body.enabled else 'disabled'} by {ip} at {_now_iso()}")
+    return {"enabled": body.enabled}
+
+
+@app.post("/api/service/history/clear")
+def service_clear_history(body: HistoryClearIn, request: Request, _token: str = Depends(require_level("service"))) -> dict:
+    if not body.confirm:
+        raise HTTPException(status_code=400, detail="Must pass confirm: true to clear history")
+    deleted = history.clear_history()
+    ip = request.client.host if request.client else "unknown"
+    print(f"[history] history cleared ({deleted} row(s)) by {ip} at {_now_iso()}")
+    return {"deleted_rows": deleted}
+
+
+@app.get("/api/service/history/summary")
+def service_history_summary(_token: str = Depends(require_level("service"))) -> dict:
+    return history.get_summary()
 
 
 # Mounted last so it only catches what /api/* and /ws didn't already

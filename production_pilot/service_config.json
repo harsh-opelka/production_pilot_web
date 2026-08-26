@@ -1,4 +1,6 @@
 {
-  "password_hash": "bfbc80d3a825991ac9be313304f806a1266a26cc6ad68426b689863e7c19b49d",
-  "salt": "3b2a9706b04c20b64c0d89c289bf3277"
+  "management_password_hash": "53bb047488949811a6b4a557483ff19985e4117438f9f6260a265930734afed9",
+  "management_salt": "aa9fbd75117b0c61e74d8c948e4ad41d",
+  "service_password_hash": "bfbc80d3a825991ac9be313304f806a1266a26cc6ad68426b689863e7c19b49d",
+  "service_salt": "3b2a9706b04c20b64c0d89c289bf3277"
 }

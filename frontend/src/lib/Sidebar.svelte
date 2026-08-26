@@ -1,6 +1,7 @@
 <script>
-  import { page, lang, theme, uiScale } from './stores.js';
+  import { page, lang, theme, uiScale, auth } from './stores.js';
   import { translate } from './translations.js';
+  import { logout } from './serviceApi.js';
 
   function toggleLang() {
     lang.set($lang === 'en' ? 'de' : 'en');
@@ -23,10 +24,17 @@
       </button>
     </li>
     <li>
-      <button class:active={$page === 'service'} onclick={() => page.set('service')}>
-        {translate($lang, 'nav_service')}
+      <button class:active={$page === 'statistics'} onclick={() => page.set('statistics')}>
+        {translate($lang, 'nav_statistics')}
       </button>
     </li>
+    {#if $auth.level === 'service'}
+      <li>
+        <button class:active={$page === 'service'} onclick={() => page.set('service')}>
+          {translate($lang, 'nav_service')}
+        </button>
+      </li>
+    {/if}
   </ul>
 
   <div class="toggles">
@@ -37,6 +45,9 @@
     </button>
     <button class="toggle" onclick={toggleTheme} aria-label="Toggle theme">
       {translate($lang, $theme === 'dark' ? 'theme_dark' : 'theme_light')}
+    </button>
+    <button class="toggle" onclick={logout}>
+      {translate($lang, 'logout')}
     </button>
 
     <div class="scale-control">

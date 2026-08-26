@@ -1,11 +1,12 @@
 <script>
   import { onMount } from 'svelte';
-  import { theme, page, uiScale } from './lib/stores.js';
+  import { theme, page, uiScale, auth } from './lib/stores.js';
   import { fetchInitialState, connectWebSocket } from './lib/websocket.js';
   import Sidebar from './lib/Sidebar.svelte';
   import TopBar from './lib/TopBar.svelte';
   import ConnectionBanner from './lib/ConnectionBanner.svelte';
   import Dashboard from './lib/Dashboard.svelte';
+  import Statistics from './lib/Statistics.svelte';
   import ServicePage from './lib/ServicePage.svelte';
   import Footer from './lib/Footer.svelte';
 
@@ -17,6 +18,15 @@
     document.documentElement.style.setProperty('--ui-scale', $uiScale);
   });
 
+  // Logged out (fresh visit, explicit logout, or a 401 from any
+  // protected call — see serviceApi.js) -> drop back to Production with
+  // no sidebar, same as a fresh visit. Covers navigating away from a
+  // page the current level can no longer see (e.g. a Service session
+  // that expired while the wizard was open).
+  $effect(() => {
+    if (!$auth.token) page.set('dashboard');
+  });
+
   onMount(async () => {
     await fetchInitialState();
     connectWebSocket();
@@ -25,15 +35,19 @@
 
 <div class="app">
   <div class="body">
-    <Sidebar />
+    {#if $auth.token}
+      <Sidebar />
+    {/if}
     <div class="main">
       <TopBar />
       <ConnectionBanner />
       <div class="content">
-        {#if $page === 'dashboard'}
-          <Dashboard />
-        {:else}
+        {#if $page === 'statistics'}
+          <Statistics />
+        {:else if $page === 'service'}
           <ServicePage />
+        {:else}
+          <Dashboard />
         {/if}
       </div>
     </div>

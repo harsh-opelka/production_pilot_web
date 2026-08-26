@@ -14,3 +14,6 @@ venv/
 
 # Local config — see note below
 scan_results.json
+
+# Local runtime data — KPI history logger, never committed
+history.db

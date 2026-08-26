@@ -3,11 +3,14 @@
   import { machinesState, lang } from './stores.js';
   import { translate } from './translations.js';
   import { computeNextAction } from './nextAction.js';
+  import AuthGate from './AuthGate.svelte';
 
   let nextAction = $derived(computeNextAction($machinesState.groups, $lang));
 </script>
 
 <header class="topbar">
+  <AuthGate />
+
   <div class="next-action">
     <span class="prefix">{translate($lang, 'next_action_prefix')}</span>
     <span class="pill tier-{nextAction.tier}">{nextAction.text}</span>

@@ -26,6 +26,10 @@ export const view = persisted('pp_view', 'block');
 // Manual display-scale (0.7-3.0), independent per device/browser so a
 // phone and a wall-mounted TV can each keep their own preferred size.
 export const uiScale = persisted('pp_ui_scale', 1);
+
+// 'dashboard' | 'statistics' | 'service' — which main-content view is
+// showing. 'service' is only ever reachable while auth.level is
+// 'service' (see Sidebar.svelte, which is the only thing that sets it).
 export const page = writable('dashboard');
 
 // { connected, timestamp, groups } — same shape as GET /api/machines
@@ -36,11 +40,9 @@ export const machinesState = writable({ connected: false, timestamp: null, group
 // stale/no data, which is the dangerous case on a production-hall TV.
 export const wsConnected = writable(false);
 
-// Service-tab session token. Deliberately a plain (non-persisted) store,
-// not run through persisted() — it must NOT survive a closed tab, since
-// this gates config changes and password resets on a shared-network app.
-export const serviceToken = writable(null);
-
-// Set when a 401 clears an existing (not merely absent) token — lets the
-// login prompt distinguish "your session expired" from "enter password".
-export const serviceSessionExpired = writable(false);
+// Gear-gate session: { token, level } where level is 'management' |
+// 'service' | null. Deliberately a plain (non-persisted) store, not run
+// through persisted() — it must NOT survive a closed tab (or a refresh:
+// reloading is treated the same as logging out), since this gates
+// config changes and password resets on a shared-network app.
+export const auth = writable({ token: null, level: null });
