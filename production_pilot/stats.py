@@ -141,6 +141,44 @@ def compute_daily_summary(date: str) -> dict:
     return {"date": date, "machines": machines}
 
 
+def compute_today_totals() -> dict:
+    """Dashboard-top-bar aggregate: sums compute_daily_summary's per-machine
+    rows for today across ALL machines into one glanceable total, instead of
+    per-machine rows (that's the Statistics screen's job). Same underlying
+    computation as /api/stats/daily-summary — just summed differently.
+
+    has_data mirrors compute_daily_summary's own "no rows at all" signal
+    (recording off, or nothing logged yet today) rather than re-deriving it,
+    so the frontend can show a placeholder instead of a false "0h 0m"."""
+    date = today_local()
+    summary = compute_daily_summary(date)
+    machines = summary["machines"]
+    if not machines:
+        return {
+            "date": date,
+            "has_data": False,
+            "baking_seconds": 0,
+            "waiting_seconds": 0,
+            "error_seconds": 0,
+            "productivity_pct": 0.0,
+        }
+
+    baking = sum(m["baking_seconds"] for m in machines)
+    waiting = sum(m["ready_seconds"] for m in machines)
+    error = sum(m["error_seconds"] for m in machines)
+    total_tracked = sum(sum(m[key] for key in _SECONDS_KEYS) for m in machines)
+    productivity_pct = round((baking / total_tracked) * 100, 1) if total_tracked > 0 else 0.0
+
+    return {
+        "date": date,
+        "has_data": True,
+        "baking_seconds": baking,
+        "waiting_seconds": waiting,
+        "error_seconds": error,
+        "productivity_pct": productivity_pct,
+    }
+
+
 _ZERO_TOTALS = {key: 0 for key in _SECONDS_KEYS}
 
 

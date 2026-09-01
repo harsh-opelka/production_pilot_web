@@ -1,9 +1,10 @@
 <script>
   import logo from '../assets/opelka_logo.png';
-  import { machinesState, lang } from './stores.js';
+  import { machinesState, lang, page } from './stores.js';
   import { translate } from './translations.js';
   import { computeNextAction } from './nextAction.js';
   import AuthGate from './AuthGate.svelte';
+  import KpiSummary from './KpiSummary.svelte';
 
   let nextAction = $derived(computeNextAction($machinesState.groups, $lang));
 </script>
@@ -15,6 +16,10 @@
     <span class="prefix">{translate($lang, 'next_action_prefix')}</span>
     <span class="pill tier-{nextAction.tier}">{nextAction.text}</span>
   </div>
+
+  {#if $page === 'dashboard'}
+    <KpiSummary />
+  {/if}
 
   <div class="logo-panel">
     <img src={logo} alt="Opelka" />

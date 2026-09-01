@@ -35,6 +35,13 @@ const en = {
   display_size: 'Display Size',
   logout: 'Log out',
 
+  kpi_busy: 'Busy',
+  kpi_waiting: 'Waiting',
+  kpi_error: 'Error',
+  kpi_productivity: 'Productivity',
+  kpi_no_data: '–',
+  kpi_hm_format: '{h}h {m}m',
+
   stats_date_label: 'Date',
   stats_download_csv: 'Download CSV',
   stats_no_data: 'No data recorded for this date',
@@ -131,6 +138,11 @@ const de = {
   theme_light: 'Hell',
   display_size: 'Anzeigegröße',
   logout: 'Abmelden',
+
+  kpi_busy: 'Beschäftigt',
+  kpi_waiting: 'Warte',
+  kpi_error: 'Störung',
+  kpi_productivity: 'Produktivität',
 
   stats_date_label: 'Datum',
   stats_download_csv: 'CSV herunterladen',

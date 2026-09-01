@@ -16,3 +16,10 @@ export function stateLabel(plc, language) {
   const key = `state_${plc.state.toLowerCase()}`;
   return translate(language, key);
 }
+
+export function formatHoursMinutes(seconds, language) {
+  const total = Math.max(0, Math.round(seconds ?? 0));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  return translate(language, 'kpi_hm_format', { h, m });
+}

@@ -417,6 +417,14 @@ def get_machines() -> dict:
     return get_state()
 
 
+@app.get("/api/stats/today-totals")
+def stats_today_totals() -> dict:
+    """Compact aggregate for the Dashboard top bar — same visibility level
+    as /api/machines (no auth), unlike the rest of /api/stats/* below which
+    is Management-only detail. See stats.compute_today_totals."""
+    return stats.compute_today_totals()
+
+
 @app.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
