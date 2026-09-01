@@ -58,6 +58,7 @@ class PlcData:
     remaining_seconds: int | None = None   # only meaningful when BAKING
     default_priority:  int = 0             # index in saved install-time order, 0 = highest
     unit_number:       int = 0             # 1-based position within the machine; display layer builds a translated "{unit word} {n}" label from this (see utils.format_unit_name), so switching language updates it live
+    recipe:            str | None = None   # current recipe/product name — plumbing only for now; no OPC UA node for this exists yet (pending a node ID from Tim), so this is always None until something actually sets it. Never fabricate a value here.
 
     def to_dict(self) -> dict:
         """
@@ -65,6 +66,10 @@ class PlcData:
         `name` (internal-only, never shown) and sends raw
         remaining_seconds/state-name rather than pre-formatted or
         colored values — the frontend owns localisation and styling.
+
+        `ip` is included for Service-level consumers (the Installation
+        Wizard) that still need it — the Dashboard views simply choose
+        not to render it (see FryerTile.svelte / MachineListRow.svelte).
         """
         return {
             "ip": self.ip,
@@ -73,6 +78,7 @@ class PlcData:
             "is_online": self.is_online,
             "remaining_seconds": self.remaining_seconds,
             "default_priority": self.default_priority,
+            "recipe": self.recipe,
         }
 
 

@@ -75,7 +75,12 @@ def _parse(ts: str) -> datetime:
 
 
 def _day_start(date: str) -> datetime:
-    return datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    """The UTC instant of local midnight starting `date` — see
+    history.local_day_start_utc for why this must be local-day-aware
+    rather than treating `date` as literally UTC midnight (state
+    transitions are UTC-stamped, but "today"/a picked date is a local
+    calendar concept)."""
+    return history.local_day_start_utc(date)
 
 
 def compute_daily_summary(date: str) -> dict:

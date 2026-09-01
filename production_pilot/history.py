@@ -26,19 +26,40 @@ from __future__ import annotations
 import sqlite3
 import threading
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent / "history.db"
 
 _RECORDING_KEY = "recording_enabled"
+_TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 _db_lock = threading.Lock()
 _recording_enabled = False  # cache; authoritative value lives in app_settings
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(timezone.utc).strftime(_TIMESTAMP_FORMAT)
+
+
+def local_day_start_utc(date: str) -> datetime:
+    """The UTC instant of local midnight at the start of `date` (a
+    YYYY-MM-DD string interpreted in the server's own local timezone).
+
+    state_transitions timestamps are always stored in UTC (_now_iso()),
+    while "today"/a picked calendar date is inherently a LOCAL concept —
+    e.g. a transition at 01:00 CEST is stored as 23:00 UTC the previous
+    day. Matching rows by a naive substring of the UTC timestamp against
+    a local date string silently drops (or misfiles into the wrong day)
+    anything within the local/UTC offset window around local midnight.
+    Callers use this to compute the actual UTC range a local calendar
+    day covers, instead of comparing date strings directly.
+
+    `datetime.astimezone()` on a naive datetime presumes it already
+    represents system-local time and just attaches the correct tzinfo
+    (including DST) for that instant — exactly what's needed here."""
+    local_midnight = datetime.strptime(date, "%Y-%m-%d").astimezone()
+    return local_midnight.astimezone(timezone.utc)
 
 
 @contextmanager
@@ -157,17 +178,25 @@ def get_available_dates() -> list[str]:
 
 
 def get_daily_transitions(date: str) -> list[dict]:
-    """All rows whose UTC date matches `date`, ordered per-PLC by
-    timestamp — the walk order stats.compute_daily_summary() needs."""
+    """All rows falling within the LOCAL calendar day `date` (YYYY-MM-DD,
+    server-local timezone — see local_day_start_utc), ordered per-PLC by
+    timestamp — the walk order stats.compute_daily_summary() needs.
+
+    Matches against the actual UTC instant range the local day covers,
+    not a naive substring of the (UTC) stored timestamp — see
+    local_day_start_utc's docstring for why that would misfile rows near
+    local midnight."""
+    start = local_day_start_utc(date)
+    end = start + timedelta(days=1)
     with _db_lock, _connection() as conn:
         rows = conn.execute(
             """
             SELECT id, timestamp, group_name, plc_ip, unit_number, old_state, new_state, was_online
             FROM state_transitions
-            WHERE substr(timestamp, 1, 10) = ?
+            WHERE timestamp >= ? AND timestamp < ?
             ORDER BY plc_ip, timestamp, id
             """,
-            (date,),
+            (start.strftime(_TIMESTAMP_FORMAT), end.strftime(_TIMESTAMP_FORMAT)),
         ).fetchall()
     return [dict(row) for row in rows]
 

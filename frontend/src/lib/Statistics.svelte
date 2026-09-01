@@ -2,17 +2,10 @@
   import { onMount } from 'svelte';
   import { lang, auth, theme } from './stores.js';
   import { translate } from './translations.js';
-  import { formatUnitLabel } from './format.js';
+  import { formatUnitLabel, todayLocalDate } from './format.js';
   import { getAvailableDates, getDailySummary, getRangeSummary, ServiceApiError } from './serviceApi.js';
   import SnapshotChart from './SnapshotChart.svelte';
   import TrendLineChart from './TrendLineChart.svelte';
-
-  function todayLocal() {
-    const d = new Date();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    return `${d.getFullYear()}-${mm}-${dd}`;
-  }
 
   function daysAgoLocal(n) {
     const d = new Date();
@@ -29,7 +22,7 @@
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   }
 
-  let selectedDate = $state(todayLocal());
+  let selectedDate = $state(todayLocalDate());
   let availableDates = $state([]);
   let machines = $state([]);
   let loadError = $state('');
@@ -60,7 +53,7 @@
   });
 
   let minDate = $derived(availableDates[0]);
-  let maxDate = $derived(todayLocal());
+  let maxDate = $derived(todayLocalDate());
 
   // Group rows by group_name, preserving the backend's sorted order —
   // same grouping convention as MachineGroupSection.svelte on the Dashboard.
@@ -89,7 +82,7 @@
   let viewMode = $state('snapshot'); // 'snapshot' | 'trend'
 
   let rangeStart = $state(daysAgoLocal(6)); // last 7 days including today, by default
-  let rangeEnd = $state(todayLocal());
+  let rangeEnd = $state(todayLocalDate());
   let rangeDays = $state([]); // [{ date, machines }]
   let rangeError = $state('');
 
@@ -175,7 +168,7 @@
       </label>
       <label class="date-field">
         <span>{translate($lang, 'stats_range_end')}</span>
-        <input type="date" bind:value={rangeEnd} min={rangeStart} max={todayLocal()} />
+        <input type="date" bind:value={rangeEnd} min={rangeStart} max={todayLocalDate()} />
       </label>
     </div>
   {/if}

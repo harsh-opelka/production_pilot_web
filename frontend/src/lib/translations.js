@@ -42,6 +42,11 @@ const en = {
   kpi_no_data: '–',
   kpi_hm_format: '{h}h {m}m',
 
+  list_col_status: 'Status',
+  list_col_time: 'Time',
+  list_col_recipe: 'Recipe',
+  list_col_productivity: 'Productivity',
+
   stats_date_label: 'Date',
   stats_download_csv: 'Download CSV',
   stats_no_data: 'No data recorded for this date',
@@ -143,6 +148,11 @@ const de = {
   kpi_waiting: 'Warte',
   kpi_error: 'Störung',
   kpi_productivity: 'Produktivität',
+
+  list_col_status: 'Status',
+  list_col_time: 'Zeit',
+  list_col_recipe: 'Rezept',
+  list_col_productivity: 'Produktivität',
 
   stats_date_label: 'Datum',
   stats_download_csv: 'CSV herunterladen',
