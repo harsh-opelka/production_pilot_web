@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store';
+import { writable, readable } from 'svelte/store';
 
 function persisted(key, initial) {
   let value = initial;
@@ -27,9 +27,10 @@ export const view = persisted('pp_view', 'block');
 // phone and a wall-mounted TV can each keep their own preferred size.
 export const uiScale = persisted('pp_ui_scale', 1);
 
-// 'dashboard' | 'statistics' | 'service' — which main-content view is
-// showing. 'service' is only ever reachable while auth.level is
-// 'service' (see Sidebar.svelte, which is the only thing that sets it).
+// 'dashboard' | 'statistics' | 'service' | 'settings' — which main-content
+// view is showing. 'service' and 'settings' are only ever reachable while
+// auth.level is 'service' (see Sidebar.svelte, which is the only thing
+// that sets it).
 export const page = writable('dashboard');
 
 // { connected, timestamp, groups } — same shape as GET /api/machines
@@ -39,6 +40,16 @@ export const machinesState = writable({ connected: false, timestamp: null, group
 // also considers machinesState.connected — either one being false means
 // stale/no data, which is the dangerous case on a production-hall TV.
 export const wsConnected = writable(false);
+
+// Ticks once a second — shared by every live-elapsed-timer consumer
+// (FryerTile, MachineListRow, Statistics' Live mode) so there's exactly
+// ONE interval running for the whole app instead of one per tile/row.
+// Timers derive elapsed time from (this - a server timestamp) rather
+// than counting up locally, so they stay correct across reloads.
+export const nowTick = readable(Date.now(), (set) => {
+  const interval = setInterval(() => set(Date.now()), 1000);
+  return () => clearInterval(interval);
+});
 
 // Gear-gate session: { token, level } where level is 'management' |
 // 'service' | null. Deliberately a plain (non-persisted) store, not run

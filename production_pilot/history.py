@@ -218,6 +218,20 @@ def get_next_transition_after(plc_ip: str, timestamp: str) -> dict | None:
     return dict(row) if row else None
 
 
+def get_latest_transition_per_plc() -> dict[str, str]:
+    """plc_ip -> timestamp of that PLC's most recent state_transitions row
+    (across all history, regardless of the current recording toggle) —
+    used to hydrate the live per-tile "time in state" timer on server
+    startup so a restart doesn't reset it to zero (see server.py's
+    _hydrate_state_entered_at). Empty dict if nothing has ever been
+    recorded."""
+    with _db_lock, _connection() as conn:
+        rows = conn.execute(
+            "SELECT plc_ip, MAX(timestamp) AS timestamp FROM state_transitions GROUP BY plc_ip"
+        ).fetchall()
+    return {row["plc_ip"]: row["timestamp"] for row in rows}
+
+
 def get_summary() -> dict:
     with _db_lock, _connection() as conn:
         row = conn.execute(

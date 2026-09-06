@@ -55,7 +55,6 @@ _SECONDS_KEYS = (
 _CSV_HEADERS = [
     "Machine Group",
     "Unit",
-    "IP",
     "Baking (min)",
     "Ready (min)",
     "Heating (min)",
@@ -277,7 +276,6 @@ def to_csv(summary: dict) -> str:
             [
                 m["group_name"],
                 m["unit_number"],
-                m["plc_ip"],
                 round(m["baking_seconds"] / 60, 1),
                 round(m["ready_seconds"] / 60, 1),
                 round(m["heating_seconds"] / 60, 1),

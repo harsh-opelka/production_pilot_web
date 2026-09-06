@@ -2,6 +2,8 @@
   import { lang } from './stores.js';
   import { translate } from './translations.js';
   import ChangePasswordCard from './ChangePasswordCard.svelte';
+  import ChangeManagementPasswordCard from './ChangeManagementPasswordCard.svelte';
+  import RecordingCard from './RecordingCard.svelte';
   import InstallWizard from './InstallWizard.svelte';
 
   let wizardOpen = $state(false);
@@ -18,6 +20,14 @@
 
     <div class="card">
       <ChangePasswordCard />
+    </div>
+
+    <div class="card">
+      <ChangeManagementPasswordCard />
+    </div>
+
+    <div class="card">
+      <RecordingCard />
     </div>
   </div>
 </div>

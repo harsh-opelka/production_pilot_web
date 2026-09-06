@@ -51,8 +51,15 @@
 
   /* TV-scale typography: clamp() so a fixed viewport doesn't dictate
      one physical text size across the 55"-75" range this runs on. */
-  --font-next-action: clamp(1.5rem, 2.4vw, 2.75rem);
-  --font-nav-item: clamp(1.05rem, 1.4vw, 1.5rem);
+  /* ~27% smaller than the original clamp(1.5rem, 2.4vw, 2.75rem) — still
+     the most prominent element in the top bar (well above --font-kpi-
+     summary's clamp(0.7rem, 0.85vw, 0.95rem) at every scale). */
+  --font-next-action: clamp(1.1rem, 1.75vw, 2rem);
+  /* Trimmed ~12% off the max end so "Einstellungen" (the longest nav
+     label, DE) fits the sidebar on one line — see Sidebar.svelte, which
+     also fixes buttons' browser-default white-space:pre (the actual
+     cause of the clipping) as a wrap fallback. */
+  --font-nav-item: clamp(0.95rem, 1.2vw, 1.25rem);
   --font-toggle: clamp(0.9rem, 1.1vw, 1.15rem);
   --font-group-header: clamp(1.2rem, 1.7vw, 1.9rem);
   --font-tile-title: clamp(1.4rem, 2.1vw, 2.5rem);

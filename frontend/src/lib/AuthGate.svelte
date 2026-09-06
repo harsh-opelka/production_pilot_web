@@ -50,12 +50,12 @@
 {#if !$auth.token}
   <button
     type="button"
-    class="gear-button"
+    class="menu-button"
     onclick={openGate}
-    aria-label={translate($lang, 'gear_tooltip')}
-    title={translate($lang, 'gear_tooltip')}
+    aria-label={translate($lang, 'menu_tooltip')}
+    title={translate($lang, 'menu_tooltip')}
   >
-    ⚙
+    ☰
   </button>
 {/if}
 
@@ -84,7 +84,7 @@
      auto, so it just takes its own small size at the start of the row
      without disturbing the next-action/logo layout or its wrap
      behavior at high --ui-scale. */
-  .gear-button {
+  .menu-button {
     flex: 0 0 auto;
     width: 2.25rem;
     height: 2.25rem;
@@ -99,7 +99,7 @@
     line-height: 1;
   }
 
-  .gear-button:hover {
+  .menu-button:hover {
     color: var(--text-primary);
   }
 

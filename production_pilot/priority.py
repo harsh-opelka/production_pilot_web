@@ -18,6 +18,21 @@ from .models import MachineGroup, MachineState, PlcData
 NEAR_COMPLETION_THRESHOLD_SECONDS = 30
 
 
+def is_near_completion(plc: PlcData) -> bool:
+    """True for a BAKING PLC with less than NEAR_COMPLETION_THRESHOLD_SECONDS
+    remaining — the "Fast fertig" / "Almost finished" display override (see
+    serializers.group_to_dict, which sends this as the `near_completion`
+    flag). Display-only: MachineState stays BAKING, and this is exactly the
+    same condition tier() below uses for its tier-2 cutoff, kept as one
+    shared check so the two never drift apart."""
+    return (
+        plc.is_online
+        and plc.state == MachineState.BAKING
+        and plc.remaining_seconds is not None
+        and plc.remaining_seconds < NEAR_COMPLETION_THRESHOLD_SECONDS
+    )
+
+
 def tier(plc: PlcData) -> int:
     # Offline machines sink to the bottom regardless of their last-known
     # state — this check must come before any state-based tier so an
@@ -28,9 +43,7 @@ def tier(plc: PlcData) -> int:
         return 5
     if plc.state == MachineState.ERROR:
         return 1
-    if (plc.state == MachineState.BAKING
-            and plc.remaining_seconds is not None
-            and plc.remaining_seconds < NEAR_COMPLETION_THRESHOLD_SECONDS):
+    if is_near_completion(plc):
         return 2
     if plc.state == MachineState.HEATING:
         return 4

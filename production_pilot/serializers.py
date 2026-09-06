@@ -13,11 +13,22 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from .models import MachineGroup
-from .priority import calculate_priority
+from .priority import calculate_priority, is_near_completion
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _plc_to_dict(plc) -> dict:
+    d = plc.to_dict()
+    # Display-only "Fast fertig"/"Almost finished" override — see
+    # priority.is_near_completion's docstring. Computed here (rather than
+    # inside PlcData.to_dict itself) because it needs priority.py, and
+    # priority.py already imports models.py — putting it there would be a
+    # models <-> priority import cycle (see module docstring).
+    d["near_completion"] = is_near_completion(plc)
+    return d
 
 
 def group_to_dict(group: MachineGroup) -> dict:
@@ -30,7 +41,7 @@ def group_to_dict(group: MachineGroup) -> dict:
     return {
         "name": group.name,
         "type": group.type,
-        "plcs": [plc.to_dict() for plc in ordered],
+        "plcs": [_plc_to_dict(plc) for plc in ordered],
     }
 
 

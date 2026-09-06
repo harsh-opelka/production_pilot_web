@@ -1,9 +1,15 @@
 <script>
   import { onMount } from 'svelte';
-  import { lang, auth, theme } from './stores.js';
+  import { lang, auth, theme, nowTick } from './stores.js';
   import { translate } from './translations.js';
   import { formatUnitLabel, todayLocalDate } from './format.js';
-  import { getAvailableDates, getDailySummary, getRangeSummary, ServiceApiError } from './serviceApi.js';
+  import {
+    getAvailableDates,
+    getDailySummary,
+    getRangeSummary,
+    getRecordingStatus,
+    ServiceApiError,
+  } from './serviceApi.js';
   import SnapshotChart from './SnapshotChart.svelte';
   import TrendLineChart from './TrendLineChart.svelte';
 
@@ -74,12 +80,51 @@
     `/api/stats/daily-summary/csv?date=${encodeURIComponent(selectedDate)}&token=${encodeURIComponent($auth.token ?? '')}`,
   );
 
-  // --- Snapshot / Trend toggle -----------------------------------------
+  // --- Snapshot / Trend / Live toggle -----------------------------------
   // 'selectedDate' above is untouched by this toggle, so flipping between
   // views never loses it — Snapshot reuses it directly (no separate date
   // input of its own), and it keeps driving the table/CSV regardless of
   // which chart view is showing.
-  let viewMode = $state('snapshot'); // 'snapshot' | 'trend'
+  let viewMode = $state('snapshot'); // 'snapshot' | 'trend' | 'live'
+
+  // --- Live mode ---------------------------------------------------------
+  const LIVE_REFRESH_MS = 30_000;
+
+  let liveMachines = $state([]);
+  let liveError = $state('');
+  let liveLastUpdated = $state(null); // epoch ms of the last successful fetch
+  let liveRecordingEnabled = $state(null); // null = unknown, true/false once checked
+
+  async function loadLive() {
+    try {
+      const summary = await getDailySummary(todayLocalDate());
+      liveMachines = summary.machines;
+      liveLastUpdated = Date.now();
+      liveError = '';
+    } catch (err) {
+      liveError = err instanceof ServiceApiError ? err.message : String(err);
+    }
+    try {
+      // Service-level-only endpoint — a Management session simply can't
+      // see it, so the "recording off" banner below just stays hidden
+      // rather than turning this into a hard error.
+      const status = await getRecordingStatus();
+      liveRecordingEnabled = status.enabled;
+    } catch {
+      liveRecordingEnabled = null;
+    }
+  }
+
+  $effect(() => {
+    if (viewMode !== 'live') return;
+    loadLive();
+    const interval = setInterval(loadLive, LIVE_REFRESH_MS);
+    return () => clearInterval(interval);
+  });
+
+  let liveSecondsAgo = $derived(
+    liveLastUpdated != null ? Math.max(0, Math.round(($nowTick - liveLastUpdated) / 1000)) : null,
+  );
 
   let rangeStart = $state(daysAgoLocal(6)); // last 7 days including today, by default
   let rangeEnd = $state(todayLocalDate());
@@ -144,10 +189,12 @@
 
 <div class="statistics">
   <div class="toolbar">
-    <label class="date-field">
-      <span>{translate($lang, 'stats_date_label')}</span>
-      <input type="date" bind:value={selectedDate} min={minDate} max={maxDate} />
-    </label>
+    {#if viewMode !== 'live'}
+      <label class="date-field">
+        <span>{translate($lang, 'stats_date_label')}</span>
+        <input type="date" bind:value={selectedDate} min={minDate} max={maxDate} />
+      </label>
+    {/if}
     <a class="csv-button" href={csvUrl}>{translate($lang, 'stats_download_csv')}</a>
 
     <div class="view-toggle" role="group" aria-label="Chart view">
@@ -156,6 +203,9 @@
       </button>
       <button class:active={viewMode === 'trend'} onclick={() => (viewMode = 'trend')}>
         {translate($lang, 'stats_view_trend')}
+      </button>
+      <button class:active={viewMode === 'live'} onclick={() => (viewMode = 'live')}>
+        {translate($lang, 'stats_view_live')}
       </button>
     </div>
   </div>
@@ -176,6 +226,17 @@
   <div class="charts-section">
     {#if viewMode === 'snapshot'}
       <SnapshotChart {machines} lang={$lang} theme={$theme} />
+    {:else if viewMode === 'live'}
+      {#if liveRecordingEnabled === false}
+        <p class="recording-off-note">{translate($lang, 'stats_live_recording_off')}</p>
+      {:else if liveError}
+        <p class="error">{liveError}</p>
+      {:else}
+        <SnapshotChart machines={liveMachines} lang={$lang} theme={$theme} />
+        {#if liveSecondsAgo != null}
+          <p class="live-updated">{translate($lang, 'stats_live_last_updated', { seconds: liveSecondsAgo })}</p>
+        {/if}
+      {/if}
     {:else if rangeError}
       <p class="error">{rangeError}</p>
     {:else}
@@ -204,7 +265,6 @@
       <thead>
         <tr>
           <th>{translate($lang, 'stats_col_unit')}</th>
-          <th>{translate($lang, 'stats_col_ip')}</th>
           <th>{translate($lang, 'stats_col_baking')}</th>
           <th>{translate($lang, 'stats_col_ready')}</th>
           <th>{translate($lang, 'stats_col_heating')}</th>
@@ -216,16 +276,15 @@
       </thead>
       <tbody>
         {#if loadError}
-          <tr><td colspan="9" class="table-message error">{loadError}</td></tr>
+          <tr><td colspan="8" class="table-message error">{loadError}</td></tr>
         {:else if machines.length === 0}
-          <tr><td colspan="9" class="table-message">{translate($lang, 'stats_no_data')}</td></tr>
+          <tr><td colspan="8" class="table-message">{translate($lang, 'stats_no_data')}</td></tr>
         {:else}
           {#each groupedRows as group (group.name)}
-            <tr class="group-row"><td colspan="9">{group.name}</td></tr>
+            <tr class="group-row"><td colspan="8">{group.name}</td></tr>
             {#each group.rows as m (m.plc_ip)}
               <tr>
                 <td>{formatUnitLabel(m.unit_number, $lang)}</td>
-                <td class="mono">{m.plc_ip}</td>
                 <td>{formatHM(m.baking_seconds)}</td>
                 <td>{formatHM(m.ready_seconds)}</td>
                 <td>{formatHM(m.heating_seconds)}</td>
@@ -325,6 +384,24 @@
     gap: clamp(0.75rem, 1.5vw, 1.5rem);
   }
 
+  .recording-off-note {
+    margin: 0;
+    padding: clamp(1.25rem, 3vh, 2rem);
+    background: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    color: var(--text-secondary);
+    font-size: var(--font-toggle);
+    text-align: center;
+  }
+
+  .live-updated {
+    margin: clamp(0.4rem, 0.8vh, 0.6rem) 0 0;
+    color: var(--text-secondary);
+    font-size: var(--font-tile-sub);
+    text-align: right;
+  }
+
   .output-note {
     margin: 0 0 clamp(1.25rem, 2.5vh, 2rem);
     color: var(--text-secondary);
@@ -368,11 +445,6 @@
   th {
     color: var(--text-secondary);
     font-weight: 600;
-  }
-
-  td.mono {
-    font-family: ui-monospace, Consolas, monospace;
-    color: var(--text-secondary);
   }
 
   .group-row td {

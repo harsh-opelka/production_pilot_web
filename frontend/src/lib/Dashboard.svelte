@@ -1,9 +1,9 @@
 <script>
   import { machinesState, view, lang, auth } from './stores.js';
-  import { translate } from './translations.js';
   import { todayLocalDate } from './format.js';
   import { getDailySummary } from './serviceApi.js';
   import MachineGroupSection from './MachineGroupSection.svelte';
+  import ViewToggle from './ViewToggle.svelte';
 
   const PRODUCTIVITY_REFRESH_MS = 60_000;
 
@@ -33,14 +33,7 @@
 
 <div class="dashboard">
   <div class="toolbar">
-    <div class="view-toggle" role="group" aria-label="View mode">
-      <button class:active={$view === 'block'} onclick={() => view.set('block')}>
-        {translate($lang, 'block_view')}
-      </button>
-      <button class:active={$view === 'list'} onclick={() => view.set('list')}>
-        {translate($lang, 'list_view')}
-      </button>
-    </div>
+    <ViewToggle />
   </div>
 
   <div class="groups">
@@ -64,28 +57,6 @@
     justify-content: flex-end;
     margin-bottom: clamp(0.75rem, 1.5vh, 1.5rem);
     flex-shrink: 0;
-  }
-
-  .view-toggle {
-    display: flex;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius);
-    overflow: hidden;
-  }
-
-  .view-toggle button {
-    font-size: var(--font-view-toggle);
-    padding: clamp(0.4rem, 0.7vh, 0.7rem) clamp(0.9rem, 1.4vw, 1.5rem);
-    border: none;
-    background: var(--bg-panel);
-    color: var(--text-secondary);
-    transition: background 0.15s, color 0.15s;
-  }
-
-  .view-toggle button.active {
-    background: var(--opelka-blue);
-    color: var(--opelka-blue-fg);
-    font-weight: 600;
   }
 
   .groups {

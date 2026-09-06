@@ -123,30 +123,59 @@ def _reload_source() -> None:
 
 _last_known: dict[str, tuple[str, str, bool]] = {}  # plc.ip -> (group_name, state.name, is_online)
 
+# plc.ip -> ISO 8601 UTC timestamp of the most recent transition INTO the
+# PLC's current state, kept up to date regardless of the recording toggle
+# (same reasoning as _last_known above) and sent to the frontend as
+# state_entered_at (see PlcData.to_dict) for the live per-tile elapsed
+# timer. Seeded from history at startup — see _hydrate_state_entered_at.
+_state_entered_at: dict[str, str] = {}
+
+
+def _hydrate_state_entered_at() -> None:
+    """Called once at startup (see lifespan below), before the poll loop
+    starts. Seeds _state_entered_at from each PLC's most recent
+    state_transitions row, so a server restart doesn't reset the live
+    elapsed-time timer to zero — a PLC with no prior row (recording never
+    turned on, or never configured before) simply isn't seeded here, and
+    falls back to "now" the first time _detect_and_log_transitions below
+    sees it."""
+    _state_entered_at.update(history.get_latest_transition_per_plc())
+
 
 def _detect_and_log_transitions(groups: list[MachineGroup]) -> None:
     for group in groups:
         for plc in group.plcs:
             current = (group.name, plc.state.name, plc.is_online)
             previous = _last_known.get(plc.ip)
-            if previous == current:
-                continue
 
-            if history.is_recording_enabled():
-                try:
-                    history.record_transition(
-                        group_name=group.name,
-                        plc_ip=plc.ip,
-                        unit_number=plc.unit_number,
-                        old_state=previous[1] if previous else None,
-                        new_state=plc.state.name,
-                        was_online=plc.is_online,
-                    )
-                except Exception as exc:
-                    # A DB hiccup must never take the poll loop down with it.
-                    print(f"[history] failed to record transition for {plc.ip}: {exc}")
+            if previous != current:
+                # A genuine transition (previous is not None) always resets
+                # the clock. The very first sighting of a PLC in this
+                # process's lifetime (previous is None) only resets it if
+                # nothing was hydrated from history for it — otherwise this
+                # is just the poll loop catching up to a state that was
+                # already known before the restart, and overwriting it here
+                # would defeat the hydration above.
+                if previous is not None or plc.ip not in _state_entered_at:
+                    _state_entered_at[plc.ip] = _now_iso()
 
-            _last_known[plc.ip] = current
+                if history.is_recording_enabled():
+                    try:
+                        history.record_transition(
+                            group_name=group.name,
+                            plc_ip=plc.ip,
+                            unit_number=plc.unit_number,
+                            old_state=previous[1] if previous else None,
+                            new_state=plc.state.name,
+                            was_online=plc.is_online,
+                        )
+                    except Exception as exc:
+                        # A DB hiccup must never take the poll loop down with it.
+                        print(f"[history] failed to record transition for {plc.ip}: {exc}")
+
+                _last_known[plc.ip] = current
+
+            plc.state_entered_at = _state_entered_at.get(plc.ip)
 
 
 def _poll_loop() -> None:
@@ -382,6 +411,11 @@ class PasswordChangeIn(BaseModel):
     new_password: str
 
 
+class ManagementPasswordChangeIn(BaseModel):
+    new_password: str
+    confirm_password: str
+
+
 class RecordingIn(BaseModel):
     enabled: bool
 
@@ -393,6 +427,7 @@ class HistoryClearIn(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     history.init_db()
+    _hydrate_state_entered_at()
     _set_source(_load_source())
     poll_thread = threading.Thread(target=_poll_loop, daemon=True, name="opcua-poll")
     poll_thread.start()
@@ -567,6 +602,22 @@ def service_change_password(body: PasswordChangeIn, _token: str = Depends(requir
     if not body.new_password:
         raise HTTPException(status_code=400, detail="New password must not be empty")
     service_config.set_service_password(body.new_password)
+    return {"ok": True}
+
+
+@app.post("/api/service/password/management")
+def service_change_management_password(
+    body: ManagementPasswordChangeIn, _token: str = Depends(require_level("service"))
+) -> dict:
+    # No current-password check here on purpose: this is a Service-level
+    # user resetting Management's password on its behalf (forgotten
+    # password, rotation), not Management changing its own — see
+    # service_config.set_management_password.
+    if not body.new_password:
+        raise HTTPException(status_code=400, detail="New password must not be empty")
+    if body.new_password != body.confirm_password:
+        raise HTTPException(status_code=400, detail="New password and confirmation do not match")
+    service_config.set_management_password(body.new_password)
     return {"ok": True}
 
 

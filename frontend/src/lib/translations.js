@@ -8,23 +8,27 @@ const en = {
   nav_dashboard: 'Dashboard',
   nav_statistics: 'Statistics',
   nav_service: 'Service',
+  nav_settings: 'Settings',
   coming_soon: 'Coming soon',
-  gear_tooltip: 'Access',
+  menu_tooltip: 'Access',
   auth_gate_title: 'Access Required',
   auth_gate_prompt: 'Enter password:',
   auth_gate_incorrect: 'Incorrect password.',
   block_view: 'Block View',
   list_view: 'List View',
-  next_action_prefix: 'Next action:',
-  next_action_error: 'Check error: {group} — {fryer}',
-  next_action_unload: 'Unload soon: {group} — {fryer}',
-  next_action_load: 'Load: {group} — {fryer}',
+  // Small label on top of the two-tier Next Action box (see TopBar.svelte);
+  // the larger text below it is built from the next_action_* keys below.
+  next_action_prefix: 'Next Action',
+  next_action_error: '{unit}: Check Error',
+  next_action_unload: '{unit}: Unload Soon',
+  next_action_load: '{unit}: Load Machine',
   no_action: '–',
   state_cold: 'Cold',
   state_heating: 'Heating',
   state_ready: 'Ready',
   state_baking: 'Baking',
   state_error: 'Error',
+  state_near_completion: 'Almost finished',
   status_offline: 'Offline',
   status_online: 'Online',
   unit_fryer: 'Machine',
@@ -34,6 +38,9 @@ const en = {
   theme_light: 'Light',
   display_size: 'Display Size',
   logout: 'Log out',
+  settings_language: 'Language',
+  settings_theme: 'Theme',
+  settings_view: 'Dashboard View',
 
   kpi_busy: 'Busy',
   kpi_waiting: 'Waiting',
@@ -51,7 +58,6 @@ const en = {
   stats_download_csv: 'Download CSV',
   stats_no_data: 'No data recorded for this date',
   stats_col_unit: 'Unit',
-  stats_col_ip: 'IP',
   stats_col_baking: 'Baking',
   stats_col_ready: 'Ready',
   stats_col_heating: 'Heating',
@@ -81,7 +87,7 @@ const en = {
   service_heading: 'Service',
   service_wizard_title: 'Installation Wizard',
   service_wizard_desc: 'Scan the network and group PLCs into machines.',
-  service_change_password: 'Change Password',
+  service_change_password: 'Change Service Password',
   service_current_password: 'Current Password',
   service_new_password: 'New Password',
   service_confirm_password: 'Confirm New Password',
@@ -89,6 +95,8 @@ const en = {
   service_password_current_incorrect: 'The current password is incorrect.',
   service_password_empty: 'The new password must not be empty.',
   service_password_mismatch: 'New password and confirmation do not match.',
+  service_change_management_password: 'Change Management Password',
+  service_management_password_updated: 'Management password updated successfully.',
   service_password_updated: 'Password updated successfully.',
   service_too_many_attempts: 'Too many attempts. Please try again later.',
   service_config_saved: 'Configuration saved.',
@@ -121,6 +129,23 @@ const en = {
   wizard_confirm_empty_title: 'Remove All Machines?',
   wizard_confirm_empty_message:
     'This will remove all machine configuration. The dashboard will show no machines until new ones are configured. Continue?',
+
+  service_recording_heading: 'Data Recording',
+  service_recording_toggle_label: 'Recording',
+  service_recording_status_on: 'On',
+  service_recording_status_off: 'Off',
+  service_recording_summary_empty: 'No data recorded yet.',
+  service_recording_row_count: '{n} row(s) recorded.',
+  service_recording_earliest: 'Earliest',
+  service_recording_latest: 'Latest',
+  service_recording_clear_button: 'Clear History',
+  service_recording_clear_confirm: 'This will permanently delete all recorded history. Continue?',
+  service_recording_cleared: '{n} row(s) deleted.',
+
+  stats_view_live: 'Live',
+  stats_live_last_updated: 'Last updated {seconds}s ago',
+  stats_live_recording_off:
+    'Recording is currently off — no live data being captured. Enable it in Service settings to see live data here.',
 };
 
 // V1's JSON has a couple of stray non-breaking spaces before "…" that
@@ -134,15 +159,26 @@ const de = {
   connection_lost: 'Verbindung unterbrochen — warte auf OPC-UA-Server',
   coming_soon: 'Demnächst verfügbar',
   nav_statistics: 'Statistik',
-  gear_tooltip: 'Zugang',
+  nav_settings: 'Einstellungen',
+  menu_tooltip: 'Zugang',
   auth_gate_title: 'Zugang erforderlich',
   auth_gate_prompt: 'Passwort eingeben:',
   auth_gate_incorrect: 'Falsches Passwort.',
-  next_action_prefix: 'Nächste Aktion:',
+  // Overrides de_v1's old "{group} — {fryer}" format (single-line pill) —
+  // the two-tier box now shows a plain label here and "{unit}: action"
+  // below it (see next_action_prefix/error/unload/load above).
+  next_action_prefix: 'Nächste Aktion',
+  next_action_error: '{unit}: Störung prüfen',
+  next_action_unload: '{unit}: Bald entladen',
+  next_action_load: '{unit}: Maschine beladen',
+  state_near_completion: 'Fast fertig',
   theme_dark: 'Dunkel',
   theme_light: 'Hell',
   display_size: 'Anzeigegröße',
   logout: 'Abmelden',
+  settings_language: 'Sprache',
+  settings_theme: 'Thema',
+  settings_view: 'Dashboard-Ansicht',
 
   kpi_busy: 'Beschäftigt',
   kpi_waiting: 'Warte',
@@ -158,7 +194,6 @@ const de = {
   stats_download_csv: 'CSV herunterladen',
   stats_no_data: 'Keine Daten für dieses Datum erfasst',
   stats_col_unit: 'Einheit',
-  stats_col_ip: 'IP',
   stats_col_baking: 'Backen',
   stats_col_ready: 'Bereit',
   stats_col_heating: 'Aufheizen',
@@ -182,6 +217,12 @@ const de = {
   // panels) — translated fresh, everything else above comes from de_v1.
   close: 'Schließen',
   back: 'Zurück',
+  // Overrides de_v1's generic "Passwort ändern" now that there are two
+  // distinct password forms on the Service page (see ChangePasswordCard
+  // and ChangeManagementPasswordCard).
+  service_change_password: 'Service-Passwort ändern',
+  service_change_management_password: 'Management-Passwort ändern',
+  service_management_password_updated: 'Management-Passwort erfolgreich aktualisiert.',
   service_too_many_attempts: 'Zu viele Versuche. Bitte später erneut versuchen.',
   service_config_saved: 'Konfiguration gespeichert.',
   service_config_save_failed: 'Konfiguration konnte nicht gespeichert werden: {error}',
@@ -192,6 +233,23 @@ const de = {
   wizard_confirm_empty_title: 'Alle Maschinen entfernen?',
   wizard_confirm_empty_message:
     'Dies entfernt die gesamte Maschinenkonfiguration. Das Dashboard zeigt keine Maschinen an, bis neue konfiguriert werden. Fortfahren?',
+
+  service_recording_heading: 'Datenaufzeichnung',
+  service_recording_toggle_label: 'Aufzeichnung',
+  service_recording_status_on: 'Ein',
+  service_recording_status_off: 'Aus',
+  service_recording_summary_empty: 'Noch keine Daten aufgezeichnet.',
+  service_recording_row_count: '{n} Zeile(n) aufgezeichnet.',
+  service_recording_earliest: 'Früheste',
+  service_recording_latest: 'Letzte',
+  service_recording_clear_button: 'Verlauf löschen',
+  service_recording_clear_confirm: 'Dies löscht den gesamten aufgezeichneten Verlauf dauerhaft. Fortfahren?',
+  service_recording_cleared: '{n} Zeile(n) gelöscht.',
+
+  stats_view_live: 'Live',
+  stats_live_last_updated: 'Zuletzt aktualisiert vor {seconds}s',
+  stats_live_recording_off:
+    'Die Aufzeichnung ist derzeit deaktiviert — es werden keine Live-Daten erfasst. Aktivieren Sie sie in den Service-Einstellungen, um hier Live-Daten zu sehen.',
 };
 
 export const translations = { en, de };

@@ -8,6 +8,7 @@
   import Dashboard from './lib/Dashboard.svelte';
   import Statistics from './lib/Statistics.svelte';
   import ServicePage from './lib/ServicePage.svelte';
+  import Settings from './lib/Settings.svelte';
   import Footer from './lib/Footer.svelte';
 
   $effect(() => {
@@ -25,6 +26,16 @@
   // that expired while the wizard was open).
   $effect(() => {
     if (!$auth.token) page.set('dashboard');
+  });
+
+  // 'service' and 'settings' are only ever reachable via a Service-level
+  // sidebar (see Sidebar.svelte) — if the level drops to Management (or
+  // below) while sitting on either, fall back to Dashboard rather than
+  // rendering a page whose nav item is now gone.
+  $effect(() => {
+    if ($auth.level !== 'service' && ($page === 'service' || $page === 'settings')) {
+      page.set('dashboard');
+    }
   });
 
   onMount(async () => {
@@ -46,6 +57,8 @@
           <Statistics />
         {:else if $page === 'service'}
           <ServicePage />
+        {:else if $page === 'settings'}
+          <Settings />
         {:else}
           <Dashboard />
         {/if}

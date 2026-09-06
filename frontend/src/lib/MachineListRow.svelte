@@ -1,15 +1,27 @@
 <script>
-  import { formatRemaining, formatUnitLabel, stateLabel } from './format.js';
+  import { formatElapsed, formatRemaining, formatUnitNumber, stateLabel } from './format.js';
   import { translate } from './translations.js';
+  import { nowTick } from './stores.js';
 
   let { plc, language = 'en', productivityPct = null } = $props();
 
-  let stateKey = $derived(plc.state.toLowerCase());
+  // Same "Fast fertig"/"Almost finished" colour override as FryerTile.svelte.
+  let stateKey = $derived(plc.near_completion ? 'heating' : plc.state.toLowerCase());
   let label = $derived(stateLabel(plc, language));
-  let unitLabel = $derived(formatUnitLabel(plc.unit_number, language));
+  let unitLabel = $derived(formatUnitNumber(plc.unit_number));
   let dotStyle = $derived(plc.is_online ? `background: var(--state-${stateKey});` : `background: var(--offline-border);`);
   let showRemaining = $derived(plc.is_online && plc.state === 'BAKING' && plc.remaining_seconds != null);
-  let timeText = $derived(showRemaining ? formatRemaining(plc.remaining_seconds, language) : translate(language, 'no_action'));
+
+  const TIMER_STATES = new Set(['COLD', 'HEATING', 'READY', 'ERROR']);
+  let showElapsed = $derived(!showRemaining && plc.is_online && TIMER_STATES.has(plc.state) && plc.state_entered_at != null);
+
+  let timeText = $derived(
+    showRemaining
+      ? formatRemaining(plc.remaining_seconds, language)
+      : showElapsed
+        ? formatElapsed(($nowTick - Date.parse(plc.state_entered_at)) / 1000)
+        : translate(language, 'no_action'),
+  );
   let productivityText = $derived(productivityPct != null ? `${productivityPct}%` : translate(language, 'no_action'));
 </script>
 

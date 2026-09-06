@@ -4,8 +4,8 @@ service_config.py
 Reads/writes production_pilot/service_config.json — holds the salted
 password hashes for BOTH access levels: Management (read-only Dashboard
 + Statistics) and Service (also the Installation Wizard, config, scan,
-and KPI history controls). Auto-created with defaults ("1111" management
-/ "0000" service) on first access, so a fresh checkout doesn't need a
+and KPI history controls). Auto-created with defaults ("1234" management
+/ "71686" service) on first access, so a fresh checkout doesn't need a
 manual setup step.
 
 Passwords are never stored (or compared) in plaintext: PBKDF2-HMAC-
@@ -21,8 +21,8 @@ import secrets
 from pathlib import Path
 
 _CONFIG_PATH = Path(__file__).resolve().parent / "service_config.json"
-_DEFAULT_MANAGEMENT_PASSWORD = "1111"
-_DEFAULT_SERVICE_PASSWORD = "0000"
+_DEFAULT_MANAGEMENT_PASSWORD = "1234"
+_DEFAULT_SERVICE_PASSWORD = "71686"
 _PBKDF2_ITERATIONS = 200_000
 
 
@@ -152,4 +152,17 @@ def set_service_password(new_password: str) -> None:
     new_hash, new_salt = _new_credential(new_password)
     config["service_password_hash"] = new_hash
     config["service_salt"] = new_salt
+    save_service_config(config)
+
+
+def set_management_password(new_password: str) -> None:
+    """Changes only the Management-level password; Service is untouched.
+    Deliberately takes no current-password proof — this is Service
+    resetting Management's password on its behalf (forgotten/rotation),
+    not Management changing its own. Only reachable via a Service-level
+    session (see server.py's /api/service/password/management)."""
+    config = load_service_config()
+    new_hash, new_salt = _new_credential(new_password)
+    config["management_password_hash"] = new_hash
+    config["management_salt"] = new_salt
     save_service_config(config)

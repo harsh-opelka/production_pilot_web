@@ -32,34 +32,53 @@
 </script>
 
 <div class="kpi-summary">
-  <div class="kpi-row">
-    <span class="kpi-item"><span class="kpi-label">{translate($lang, 'kpi_busy')}</span> {busy}</span>
-    <span class="kpi-item"><span class="kpi-label">{translate($lang, 'kpi_waiting')}</span> {waiting}</span>
+  <div class="kpi-cell">
+    <span class="kpi-label">{translate($lang, 'kpi_busy')}</span>
+    <span class="kpi-value">{busy}</span>
   </div>
-  <div class="kpi-row">
-    <span class="kpi-item"><span class="kpi-label">{translate($lang, 'kpi_error')}</span> {errorTime}</span>
-    <span class="kpi-item"><span class="kpi-label">{translate($lang, 'kpi_productivity')}</span> {productivity}</span>
+  <div class="kpi-cell">
+    <span class="kpi-label">{translate($lang, 'kpi_waiting')}</span>
+    <span class="kpi-value">{waiting}</span>
+  </div>
+  <div class="kpi-cell">
+    <span class="kpi-label">{translate($lang, 'kpi_error')}</span>
+    <span class="kpi-value">{errorTime}</span>
+  </div>
+  <div class="kpi-cell">
+    <span class="kpi-label">{translate($lang, 'kpi_productivity')}</span>
+    <span class="kpi-value">{productivity}</span>
   </div>
 </div>
 
 <style>
+  /* 2x2 grid, filled left-to-right/top-to-bottom by DOM order: Busy |
+     Waiting on row 1, Error | Productivity on row 2. Both columns share
+     one width (auto-sized to the widest label/value) so the two rows'
+     values line up in a clean column instead of drifting per-row. */
   .kpi-summary {
     flex: 0 0 auto;
-    display: flex;
-    flex-direction: column;
-    gap: clamp(0.1rem, 0.3vh, 0.25rem);
+    display: grid;
+    grid-template-columns: repeat(2, auto);
+    column-gap: clamp(0.9rem, 1.6vw, 1.75rem);
+    row-gap: clamp(0.15rem, 0.35vh, 0.3rem);
     font-size: var(--font-kpi-summary);
-    color: var(--text-secondary);
-    line-height: 1.3;
-    white-space: nowrap;
   }
 
-  .kpi-row {
+  .kpi-cell {
     display: flex;
-    gap: clamp(0.6rem, 1.2vw, 1.25rem);
+    align-items: baseline;
+    gap: 0.4em;
+    white-space: nowrap;
   }
 
   .kpi-label {
     font-weight: 600;
+    color: var(--text-secondary);
+  }
+
+  .kpi-value {
+    font-weight: 700;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
   }
 </style>

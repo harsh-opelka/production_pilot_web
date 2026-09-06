@@ -59,6 +59,7 @@ class PlcData:
     default_priority:  int = 0             # index in saved install-time order, 0 = highest
     unit_number:       int = 0             # 1-based position within the machine; display layer builds a translated "{unit word} {n}" label from this (see utils.format_unit_name), so switching language updates it live
     recipe:            str | None = None   # current recipe/product name — plumbing only for now; no OPC UA node for this exists yet (pending a node ID from Tim), so this is always None until something actually sets it. Never fabricate a value here.
+    state_entered_at:  str | None = None   # ISO 8601 UTC timestamp of the most recent transition INTO the current state — set by server.py's poll loop (see _detect_and_log_transitions), regardless of whether history recording is on. Lets the frontend show a live elapsed-time timer without a server round-trip every second.
 
     def to_dict(self) -> dict:
         """
@@ -79,6 +80,7 @@ class PlcData:
             "remaining_seconds": self.remaining_seconds,
             "default_priority": self.default_priority,
             "recipe": self.recipe,
+            "state_entered_at": self.state_entered_at,
         }
 
 

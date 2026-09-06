@@ -13,8 +13,10 @@
   <AuthGate />
 
   <div class="next-action">
-    <span class="prefix">{translate($lang, 'next_action_prefix')}</span>
-    <span class="pill tier-{nextAction.tier}">{nextAction.text}</span>
+    <div class="next-action-box tier-{nextAction.tier}">
+      <span class="na-label">{translate($lang, 'next_action_prefix')}</span>
+      <span class="na-content">{nextAction.text}</span>
+    </div>
   </div>
 
   {#if $page === 'dashboard'}
@@ -41,33 +43,42 @@
 
   /* flex-basis 16rem (not 0) makes this wrap onto its own full-width row
      at high --ui-scale instead of being squeezed to a sliver next to the
-     non-shrinking logo. Its own children (label, pill) wrap onto separate
-     lines too if they don't both fit — see .pill below. */
+     non-shrinking logo. */
   .next-action {
     flex: 1 1 16rem;
     min-width: 0;
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: clamp(0.4rem, 0.8vw, 0.75rem);
   }
 
-  .prefix {
-    flex: 0 0 auto;
-    font-size: var(--font-next-action);
-    font-weight: 700;
-    color: var(--text-primary);
-  }
-
-  .pill {
+  /* Two-tier hierarchy inside one coloured box: a small label on top
+     (na-label) and the combined "{unit}: action" text below it in a much
+     larger, bold weight (na-content) — see nextAction.js for how that
+     text is built. The tier-* background colours below are unchanged
+     from the previous single-line pill. */
+  .next-action-box {
     flex: 1 1 auto;
     min-width: 0;
-    overflow-wrap: break-word;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(0.05rem, 0.2vh, 0.2rem);
+    padding: clamp(0.3rem, 0.7vh, 0.55rem) clamp(0.7rem, 1.3vw, 1.1rem);
+    border-radius: var(--radius);
+    color: #ffffff;
+  }
+
+  .na-label {
+    font-size: calc(var(--font-next-action) * 0.42);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    opacity: 0.85;
+  }
+
+  .na-content {
     font-size: var(--font-next-action);
     font-weight: 700;
-    color: #ffffff;
-    padding: clamp(0.15rem, 0.4vh, 0.35rem) clamp(0.6rem, 1.2vw, 1rem);
-    border-radius: var(--radius);
+    line-height: 1.15;
+    overflow-wrap: break-word;
   }
 
   .tier-error {

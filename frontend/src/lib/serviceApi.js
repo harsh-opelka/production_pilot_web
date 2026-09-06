@@ -97,6 +97,35 @@ export function changePassword(currentPassword, newPassword) {
   });
 }
 
+export function changeManagementPassword(newPassword, confirmPassword) {
+  return serviceFetch('/api/service/password/management', {
+    method: 'POST',
+    body: JSON.stringify({ new_password: newPassword, confirm_password: confirmPassword }),
+  });
+}
+
+export function getRecordingStatus() {
+  return serviceFetch('/api/service/recording-status');
+}
+
+export function setRecording(enabled) {
+  return serviceFetch('/api/service/recording', {
+    method: 'POST',
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export function clearHistory() {
+  return serviceFetch('/api/service/history/clear', {
+    method: 'POST',
+    body: JSON.stringify({ confirm: true }),
+  });
+}
+
+export function getHistorySummary() {
+  return serviceFetch('/api/service/history/summary');
+}
+
 export function getAvailableDates() {
   return serviceFetch('/api/stats/available-dates');
 }
