@@ -8,7 +8,7 @@
 </script>
 
 <section class="group">
-  <h2 class="group-header">{group.name} <span class="group-type">({group.type})</span></h2>
+  <h2 class="group-header">{group.name}</h2>
 
   {#if mode === 'block'}
     <div class="tiles block">
@@ -50,11 +50,6 @@
     font-weight: 700;
     margin: 0 0 clamp(0.5rem, 1vh, 1rem);
     color: var(--text-primary);
-  }
-
-  .group-type {
-    font-weight: 400;
-    color: var(--text-secondary);
   }
 
   .tiles.block {

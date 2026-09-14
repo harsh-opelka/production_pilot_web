@@ -18,10 +18,14 @@
 </button>
 
 <style>
+  /* A secondary control — deliberately smaller than --font-view-toggle
+     (which the Statistics screen's snapshot/trend/live tabs still use)
+     so it doesn't visually compete with the Next Action block or the
+     tiles below it. */
   .view-toggle {
-    font-size: var(--font-view-toggle);
+    font-size: clamp(0.75rem, 0.85vw, 0.95rem);
     font-weight: 600;
-    padding: clamp(0.4rem, 0.7vh, 0.7rem) clamp(0.9rem, 1.4vw, 1.5rem);
+    padding: clamp(0.25rem, 0.4vh, 0.4rem) clamp(0.55rem, 0.9vw, 0.9rem);
     border: 1px solid var(--border-color);
     border-radius: var(--radius);
     background: var(--opelka-blue);

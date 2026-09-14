@@ -1,19 +1,18 @@
 import { translate } from './translations.js';
 import { formatUnitNumber } from './format.js';
 
-// Mirrors production_pilot/priority.py's NEAR_COMPLETION_THRESHOLD_SECONDS.
-const NEAR_COMPLETION_THRESHOLD_SECONDS = 30;
-
 const isError = (plc) => plc.is_online && plc.state === 'ERROR';
-const isNearDoneBaking = (plc) =>
-  plc.is_online &&
-  plc.state === 'BAKING' &&
-  plc.remaining_seconds != null &&
-  plc.remaining_seconds < NEAR_COMPLETION_THRESHOLD_SECONDS;
+// "Almost Finished" is a display-state override the backend computes
+// (see production_pilot/priority.is_near_completion, sent as the
+// near_completion flag) — MachineState itself stays BAKING underneath,
+// so this checks the override flag rather than re-deriving the
+// remaining_seconds threshold locally. Same flag FryerTile.svelte uses
+// for the tile's yellow override, so the two can't drift apart.
+const isNearDoneBaking = (plc) => plc.is_online && plc.near_completion === true;
 const isReady = (plc) => plc.is_online && plc.state === 'READY';
 
 // Combined "{unit}: <action>" text for the two-tier Next Action box (see
-// TopBar.svelte) — e.g. "3: Load Machine" / "3: Maschine beladen".
+// TopBar.svelte) — e.g. "3: Load" / "3: Beladen".
 function buildMessage(key, plc, language) {
   return translate(language, key, { unit: formatUnitNumber(plc.unit_number) });
 }
@@ -28,9 +27,12 @@ function buildMessage(key, plc, language) {
  * spare can outrank a READY sibling within the same group.
  *
  * Returns { text, tier } — tier identifies which precedence rule produced
- * the message ('error' | 'baking' | 'ready' | 'none'), purely so the
- * caller can pick a display colour; it does not affect which message
- * gets chosen.
+ * the message ('error' | 'near-completion' | 'ready' | 'none'), purely so
+ * the caller can pick a display colour; it does not affect which message
+ * gets chosen. Note there is no plain "baking" tier — isNearDoneBaking is
+ * the only Baking-related candidate check, so this tier always means the
+ * "Almost Finished" override, never ordinary Baking (see TopBar.svelte's
+ * .tier-near-completion, which reuses the exact same yellow as the tile).
  */
 export function computeNextAction(groups, language) {
   const candidates = groups.filter((g) => g.plcs.length > 0).map((g) => ({ group: g, plc: g.plcs[0] }));
@@ -42,7 +44,7 @@ export function computeNextAction(groups, language) {
 
   const bakingHit = candidates.find((c) => isNearDoneBaking(c.plc));
   if (bakingHit) {
-    return { text: buildMessage('next_action_unload', bakingHit.plc, language), tier: 'baking' };
+    return { text: buildMessage('next_action_near_completion', bakingHit.plc, language), tier: 'near-completion' };
   }
 
   const readyHit = candidates.find((c) => isReady(c.plc));

@@ -31,52 +31,62 @@
   let productivity = $derived(hasData ? `${totals.productivity_pct}%` : translate($lang, 'kpi_no_data'));
 </script>
 
-<div class="kpi-summary">
-  <div class="kpi-cell">
-    <span class="kpi-label">{translate($lang, 'kpi_busy')}</span>
-    <span class="kpi-value">{busy}</span>
-  </div>
-  <div class="kpi-cell">
-    <span class="kpi-label">{translate($lang, 'kpi_waiting')}</span>
-    <span class="kpi-value">{waiting}</span>
-  </div>
-  <div class="kpi-cell">
-    <span class="kpi-label">{translate($lang, 'kpi_error')}</span>
-    <span class="kpi-value">{errorTime}</span>
-  </div>
-  <div class="kpi-cell">
-    <span class="kpi-label">{translate($lang, 'kpi_productivity')}</span>
-    <span class="kpi-value">{productivity}</span>
-  </div>
-</div>
+<table class="kpi-summary">
+  <thead>
+    <tr>
+      <th>{translate($lang, 'kpi_busy')}</th>
+      <th>{translate($lang, 'kpi_waiting')}</th>
+      <th>{translate($lang, 'kpi_error')}</th>
+      <th>{translate($lang, 'kpi_productivity')}</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>{busy}</td>
+      <td>{waiting}</td>
+      <td>{errorTime}</td>
+      <td>{productivity}</td>
+    </tr>
+  </tbody>
+</table>
 
 <style>
-  /* 2x2 grid, filled left-to-right/top-to-bottom by DOM order: Busy |
-     Waiting on row 1, Error | Productivity on row 2. Both columns share
-     one width (auto-sized to the widest label/value) so the two rows'
-     values line up in a clean column instead of drifting per-row. */
+  /* A genuine 4-column table: one header row (Busy | Waiting | Error |
+     Productivity) above one value row — not the previous 2x2 grid of
+     label/value pairs. table-layout: auto (the default) lets each column
+     size to its own widest cell, so a long header like "Produktivität"
+     (DE) simply widens its own column rather than wrapping or pushing
+     into its neighbour; every other column stays only as wide as it
+     needs to be. Centering both the header and its value in the same
+     column keeps them visually paired without needing left/right
+     alignment tricks. */
   .kpi-summary {
     flex: 0 0 auto;
-    display: grid;
-    grid-template-columns: repeat(2, auto);
-    column-gap: clamp(0.9rem, 1.6vw, 1.75rem);
-    row-gap: clamp(0.15rem, 0.35vh, 0.3rem);
+    border-collapse: collapse;
     font-size: var(--font-kpi-summary);
   }
 
-  .kpi-cell {
-    display: flex;
-    align-items: baseline;
-    gap: 0.4em;
+  .kpi-summary th,
+  .kpi-summary td {
+    padding: clamp(0.2rem, 0.5vh, 0.4rem) clamp(0.5rem, 1.1vw, 1rem);
     white-space: nowrap;
+    text-align: center;
+    border-right: 1px solid var(--border-color);
   }
 
-  .kpi-label {
+  .kpi-summary th:last-child,
+  .kpi-summary td:last-child {
+    border-right: none;
+  }
+
+  .kpi-summary th {
     font-weight: 600;
+    font-style: normal;
     color: var(--text-secondary);
+    border-bottom: 1px solid var(--border-color);
   }
 
-  .kpi-value {
+  .kpi-summary td {
     font-weight: 700;
     color: var(--text-primary);
     font-variant-numeric: tabular-nums;

@@ -13,24 +13,53 @@ day's row count is small enough (recording is a deliberate on/off
 toggle, not always-on telemetry) that this costs nothing in practice.
 
 Duration-walk rules (see compute_daily_summary):
-  - A row's duration runs from its own timestamp to the NEXT row's
-    timestamp, for the same PLC.
+  - Each PLC's walk starts either at its first real transition of the
+    day, or — if it has a transition from BEFORE the day that carried
+    into it untouched — at 00:00:00 local with that carried-over state
+    as a synthetic starting point (see history.get_last_transition_before).
+    This is what lets a PLC that, say, has been READY since three days
+    ago and never transitioned again show the full day as ready_seconds
+    instead of zero.
+  - A segment's duration runs from its own start to the NEXT segment's
+    start, for the same PLC.
   - was_online == 0 always counts as offline_seconds, regardless of
     new_state — a PLC's last-known state while offline isn't trustworthy
     (see opcua_source.py: state is left stale when a PLC drops offline).
-  - The LAST row of the day per PLC has no "next row" within the day, so
-    its end boundary is resolved as:
-      1. the PLC's actual next transition, if it falls within the
-         immediately following calendar day ("next day's first
-         transition" per the spec) — this correctly captures a state
-         that carried a few hours into the next day;
-      2. otherwise, "now" if `date` is today (the state is still
-         ongoing — don't silently drop it);
-      3. otherwise (a past date with no nearby follow-up transition),
-         cap at that day's own midnight-to-midnight boundary. This is
-         deliberately NOT "extend to whatever the next transition ever
-         is" — if a PLC didn't transition again for, say, 5 days, that
-         entire gap must not get dumped into a single day's total.
+  - A segment whose state is one of history.UNTRACKED_STATES
+    (SERVER_STOPPED / UNKNOWN) is time this server was NOT observing the
+    machines — server down, or the stretch before this session started
+    watching. It counts toward neither any *_seconds total nor the
+    productivity denominator; it's reported separately as
+    untracked_seconds so the gap is auditable instead of silently
+    dropped. Without this, a server left off overnight would credit the
+    whole outage to whatever state each PLC was last seen in.
+  - A segment whose NEXT row is an UNKNOWN marker is ALSO excluded as
+    untracked, even though the segment's own state is a real one. A
+    graceful shutdown writes SERVER_STOPPED before the next startup's
+    UNKNOWN, closing the real segment off at that known instant — that
+    case is already handled by the rule above and is unaffected here.
+    But SERVER_STOPPED is only best-effort (a hard kill, crash, or power
+    loss never reaches it — see server.py's lifespan shutdown handler),
+    so a segment can run straight into an UNKNOWN marker with no
+    SERVER_STOPPED ever recorded for it. Nothing then pins down when
+    within that segment the server actually stopped observing, so
+    trusting its own state for the full span would silently hand the
+    entire outage to whatever state was active when the process died —
+    this was a real, reproduced bug (inflated daily Waiting time that
+    persisted across a restart, fixable only by clearing all history).
+    UNKNOWN's own docstring is "we don't know what happened before this
+    point in this session" — this rule is what actually makes that true
+    even when its SERVER_STOPPED counterpart never fired.
+  - The LAST segment of the day per PLC has no "next segment" within the
+    day, so its end boundary is resolved as:
+      1. "now" if `date` is today and no further transition has happened
+         yet (the state is still ongoing — don't silently drop it);
+      2. otherwise, that day's own midnight-to-midnight boundary. A
+         transition that carries past this day's end simply becomes the
+         following day's carried-over starting anchor (see rule above) —
+         it is NOT also borrowed forward into this day's own total, or
+         a state spanning a day boundary would get double-counted on
+         both sides of it.
 """
 
 from __future__ import annotations
@@ -43,6 +72,9 @@ from datetime import datetime, timedelta, timezone
 from . import history
 from .opcua_source import CONFIG_PATH
 
+# The observed-time buckets. Everything in here is summed to form the
+# productivity denominator, so UNTRACKED_KEY is deliberately NOT a member
+# — see compute_daily_summary.
 _SECONDS_KEYS = (
     "baking_seconds",
     "ready_seconds",
@@ -51,6 +83,11 @@ _SECONDS_KEYS = (
     "cold_seconds",
     "offline_seconds",
 )
+
+#: Wall-clock time this server wasn't observing the machines (see
+#: history.UNTRACKED_STATES). Reported alongside the buckets above, never
+#: mixed into them.
+_UNTRACKED_KEY = "untracked_seconds"
 
 _CSV_HEADERS = [
     "Machine Group",
@@ -61,6 +98,7 @@ _CSV_HEADERS = [
     "Error (min)",
     "Cold (min)",
     "Offline (min)",
+    "Untracked (min)",
     "Productivity (%)",
 ]
 
@@ -84,59 +122,103 @@ def _day_start(date: str) -> datetime:
 
 def compute_daily_summary(date: str) -> dict:
     rows = history.get_daily_transitions(date)
-    if not rows:
-        return {"date": date, "machines": []}
+    day_start = _day_start(date)
+    day_end = day_start + timedelta(days=1)  # this day's own midnight-to-midnight cap
 
-    is_today = date == today_local()
-    now = datetime.now(timezone.utc)
-    day_end = _day_start(date) + timedelta(days=1)  # this day's own midnight-to-midnight cap
-    next_day_end = day_end + timedelta(days=1)  # upper bound for "next day's first transition"
+    # Per-PLC state as of exactly 00:00:00 on `date`, carried over from
+    # before the day started — a synthetic anchor, not a real row (see
+    # get_last_transition_before). Lets a PLC that had zero transitions
+    # on this day but was already in some state still get credited for
+    # however long it sat in that state.
+    carry_over = history.get_last_transition_before(day_start.strftime("%Y-%m-%dT%H:%M:%SZ"))
 
     by_plc: dict[str, list[dict]] = {}
     for row in rows:
         by_plc.setdefault(row["plc_ip"], []).append(row)
 
+    if not by_plc and not carry_over:
+        return {"date": date, "machines": []}
+
+    is_today = date == today_local()
+    now = datetime.now(timezone.utc)
+
     machines = []
-    for plc_ip, plc_rows in by_plc.items():
+    for plc_ip in set(by_plc) | set(carry_over):
+        plc_rows = by_plc.get(plc_ip, [])
+        anchor = carry_over.get(plc_ip)
         totals = {key: 0.0 for key in _SECONDS_KEYS}
+        untracked = 0.0
 
-        for i, row in enumerate(plc_rows):
-            start = _parse(row["timestamp"])
+        segments = []
+        if anchor is not None:
+            segments.append({**anchor, "start": day_start})
+        segments.extend({**row, "start": _parse(row["timestamp"])} for row in plc_rows)
 
-            if i + 1 < len(plc_rows):
-                end = _parse(plc_rows[i + 1]["timestamp"])
+        for i, seg in enumerate(segments):
+            start = seg["start"]
+
+            if i + 1 < len(segments):
+                end = segments[i + 1]["start"]
+                # UNKNOWN means "we don't know what happened before this
+                # instant this session" — see history.py's docstring. The
+                # matching SERVER_STOPPED row (written on a graceful
+                # shutdown) is what would normally close off the segment
+                # right before it at a KNOWN clean boundary; without one,
+                # nothing pins down when within this segment the server
+                # actually stopped observing. SERVER_STOPPED is only
+                # best-effort (never fires on a hard kill / crash / power
+                # loss — see server.py's _write_server_marker), so a
+                # segment can end at UNKNOWN with no SERVER_STOPPED ever
+                # having been written for it at all. Trusting seg's own
+                # new_state in that case would silently hand the entire
+                # unobserved gap to whatever state was active when the
+                # process died — exactly the inflated-Waiting-time bug
+                # this fixes. Only UNKNOWN retroactively poisons its
+                # predecessor this way; SERVER_STOPPED itself is always
+                # already caught by the UNTRACKED_STATES check below, so
+                # a segment that ends there (a clean shutdown) keeps its
+                # real, fully-trusted duration.
+                poisoned_by_unknown = segments[i + 1]["new_state"] == history.UNKNOWN_MARKER
+            elif is_today:
+                end = now
+                poisoned_by_unknown = False
             else:
-                nxt = history.get_next_transition_after(plc_ip, row["timestamp"])
-                nxt_time = _parse(nxt["timestamp"]) if nxt else None
-                if nxt_time is not None and nxt_time < next_day_end:
-                    end = nxt_time
-                elif is_today:
-                    end = now
-                else:
-                    end = day_end
+                end = day_end
+                poisoned_by_unknown = False
 
             duration = max(0.0, (end - start).total_seconds())
 
-            if not row["was_online"]:
+            # Checked BEFORE was_online: a marker row carries
+            # was_online = 0 (we had no connection to anything), but
+            # "the server wasn't running" is not the same fact as "the
+            # PLC was unreachable" and must not land in offline_seconds.
+            if seg["new_state"] in history.UNTRACKED_STATES or poisoned_by_unknown:
+                untracked += duration
+            elif not seg["was_online"]:
                 totals["offline_seconds"] += duration
             else:
-                key = f"{row['new_state'].lower()}_seconds"
+                key = f"{seg['new_state'].lower()}_seconds"
                 if key in totals:
                     totals[key] += duration
                 # else: unrecognized state name in old data — ignore
                 # rather than crash; new_state always comes from
                 # MachineState.name in normal operation.
 
+        # Denominator is observed time only (untracked is excluded from
+        # `totals` by construction), so productivity is baking over the
+        # time we were actually watching — not over wall-clock time that
+        # happens to include an outage.
         total_tracked = sum(totals.values())
         productivity_pct = round((totals["baking_seconds"] / total_tracked) * 100, 1) if total_tracked > 0 else 0.0
 
-        last = plc_rows[-1]  # current identity as of the latest data that day
+        last = segments[-1]  # current identity as of the latest data that day
         machines.append(
             {
                 "group_name": last["group_name"],
                 "plc_ip": plc_ip,
                 "unit_number": last["unit_number"],
                 **{key: round(value) for key, value in totals.items()},
+                _UNTRACKED_KEY: round(untracked),
                 "productivity_pct": productivity_pct,
             }
         )
@@ -164,12 +246,16 @@ def compute_today_totals() -> dict:
             "baking_seconds": 0,
             "waiting_seconds": 0,
             "error_seconds": 0,
+            "untracked_seconds": 0,
             "productivity_pct": 0.0,
         }
 
     baking = sum(m["baking_seconds"] for m in machines)
     waiting = sum(m["ready_seconds"] for m in machines)
     error = sum(m["error_seconds"] for m in machines)
+    untracked = sum(m[_UNTRACKED_KEY] for m in machines)
+    # _SECONDS_KEYS excludes _UNTRACKED_KEY, so server-downtime periods
+    # are out of this denominator the same way they are per-machine.
     total_tracked = sum(sum(m[key] for key in _SECONDS_KEYS) for m in machines)
     productivity_pct = round((baking / total_tracked) * 100, 1) if total_tracked > 0 else 0.0
 
@@ -179,17 +265,19 @@ def compute_today_totals() -> dict:
         "baking_seconds": baking,
         "waiting_seconds": waiting,
         "error_seconds": error,
+        "untracked_seconds": untracked,
         "productivity_pct": productivity_pct,
     }
 
 
-_ZERO_TOTALS = {key: 0 for key in _SECONDS_KEYS}
+_ZERO_TOTALS = {**{key: 0 for key in _SECONDS_KEYS}, _UNTRACKED_KEY: 0}
 
 
-def _load_configured_plcs() -> list[dict]:
+def load_configured_plcs() -> list[dict]:
     """Direct, read-only parse of plc_config.json — deliberately NOT via
     OpcUaSource (constructing/using that opens real OPC UA connections,
-    which would make a stats-page request block on unreachable PLCs).
+    which would make a stats-page request — or server startup, see
+    server.py _marker_plcs — block on unreachable PLCs).
     Mirrors OpcUaSource._load_config's unit_number convention (1-based
     index within each machine's plcs array) so labels line up with the
     live dashboard. Returns [] if unconfigured or the file is missing/
@@ -234,7 +322,7 @@ def with_all_configured_machines(summary: dict) -> dict:
     empty state is reserved for that case, not for "configured but
     nothing logged yet".
     """
-    configured = _load_configured_plcs()
+    configured = load_configured_plcs()
     if not configured:
         return {"date": summary["date"], "machines": []}
 
@@ -282,6 +370,7 @@ def to_csv(summary: dict) -> str:
                 round(m["error_seconds"] / 60, 1),
                 round(m["cold_seconds"] / 60, 1),
                 round(m["offline_seconds"] / 60, 1),
+                round(m[_UNTRACKED_KEY] / 60, 1),
                 m["productivity_pct"],
             ]
         )

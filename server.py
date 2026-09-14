@@ -34,7 +34,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from production_pilot import history, scan_plcs, service_config, stats
-from production_pilot.models import MachineGroup
+from production_pilot.demo_source import RECIPE_OPTIONS, SimulatedSource
+from production_pilot.models import MachineGroup, MachineState
 from production_pilot.opcua_source import CONFIG_PATH, OpcUaSource
 from production_pilot.serializers import build_state
 
@@ -113,6 +114,24 @@ def _reload_source() -> None:
     _set_source(_load_source())
 
 
+# The demo/simulated source, created lazily the first time Demo Mode is
+# switched on (from either the data-source endpoint or the poll loop
+# itself) and kept alive afterwards so a technician's control-panel edits
+# survive switching back and forth to Real PLCs within the same server
+# run. Separate lock from _source_lock: this guards a different object
+# with a different lifecycle (created once, never swapped wholesale).
+_demo_lock = threading.Lock()
+_demo_source: SimulatedSource | None = None
+
+
+def _ensure_demo_source() -> SimulatedSource:
+    global _demo_source
+    with _demo_lock:
+        if _demo_source is None:
+            _demo_source = SimulatedSource()
+        return _demo_source
+
+
 # ---------------------------------------------------------------------------
 # History (KPI) logging — change detection only, no lock needed: this dict
 # is only ever touched from the poll thread itself, never from a request
@@ -123,23 +142,80 @@ def _reload_source() -> None:
 
 _last_known: dict[str, tuple[str, str, bool]] = {}  # plc.ip -> (group_name, state.name, is_online)
 
-# plc.ip -> ISO 8601 UTC timestamp of the most recent transition INTO the
-# PLC's current state, kept up to date regardless of the recording toggle
-# (same reasoning as _last_known above) and sent to the frontend as
+# plc.ip -> ISO 8601 UTC timestamp the PLC's current state has been
+# OBSERVED in, kept up to date regardless of the recording toggle (same
+# reasoning as _last_known above) and sent to the frontend as
 # state_entered_at (see PlcData.to_dict) for the live per-tile elapsed
-# timer. Seeded from history at startup — see _hydrate_state_entered_at.
+# timer. Seeded at startup — see _hydrate_state_entered_at.
 _state_entered_at: dict[str, str] = {}
 
 
-def _hydrate_state_entered_at() -> None:
+def _hydrate_state_entered_at(server_started_at: str) -> None:
     """Called once at startup (see lifespan below), before the poll loop
-    starts. Seeds _state_entered_at from each PLC's most recent
-    state_transitions row, so a server restart doesn't reset the live
-    elapsed-time timer to zero — a PLC with no prior row (recording never
-    turned on, or never configured before) simply isn't seeded here, and
-    falls back to "now" the first time _detect_and_log_transitions below
-    sees it."""
-    _state_entered_at.update(history.get_latest_transition_per_plc())
+    starts. Seeds each PLC's elapsed-timer anchor to the LATER of:
+
+      (a) its most recent genuine state transition in history
+          (history.get_latest_transition_per_plc, which excludes
+          lifecycle markers), or
+      (b) `server_started_at` — the instant this session began watching.
+
+    (b) is what stops a restart from presenting server downtime as
+    machine time: a server off overnight used to come back showing
+    "Ready 21:23:00" on every tile, because the last transition on
+    record was from before the outage. What the timer can honestly
+    claim is how long we've actually been observing the state, which
+    after a restart is "since we came back up". A PLC with no history at
+    all isn't seeded here and falls back to "now" the first time
+    _detect_and_log_transitions below sees it — the same instant, give
+    or take a poll cycle.
+
+    Both values use history's fixed-width UTC format, so max() over the
+    strings is a chronological max.
+
+    Deliberately anchored to this process's own start instant rather
+    than to the UNKNOWN marker row it writes: the two carry the same
+    timestamp when recording is on, and this way the timer stays honest
+    while recording is off, when no marker row exists at all."""
+    for plc_ip, last_transition in history.get_latest_transition_per_plc().items():
+        _state_entered_at[plc_ip] = max(last_transition, server_started_at)
+
+
+def _marker_plcs() -> list[dict]:
+    """group_name / plc_ip / unit_number for every PLC the ACTIVE data
+    source knows about — the fleet a lifecycle marker has to cover.
+
+    Mode-aware so downtime is excluded identically in demo and real
+    mode: demo mirrors plc_config.json but falls back to its own default
+    group when there's no config yet (see demo_source), so reading the
+    config file alone would miss those PLCs entirely.
+
+    Never touches OpcUaSource: its get_machines() does real blocking OPC
+    UA reads and would stall startup/shutdown on an unreachable PLC.
+    stats.load_configured_plcs() is a plain read of the same config the
+    source is built from. SimulatedSource is pure in-memory, so calling
+    it directly is safe."""
+    if history.get_data_source_mode() == "demo":
+        return [
+            {"group_name": group.name, "plc_ip": plc.ip, "unit_number": plc.unit_number}
+            for group in _ensure_demo_source().get_machines()
+            for plc in group.plcs
+        ]
+    return stats.load_configured_plcs()
+
+
+def _write_server_marker(new_state: str, timestamp: str) -> None:
+    """Best-effort lifecycle marker for the whole fleet (see
+    history.record_server_marker). A no-op while recording is off —
+    there's no series to punch a hole in. Never raises: a DB problem
+    must not stop the server starting, nor hold up its shutdown."""
+    if not history.is_recording_enabled():
+        return
+    try:
+        plcs = _marker_plcs()
+        history.record_server_marker(new_state=new_state, timestamp=timestamp, plcs=plcs)
+        print(f"[history] wrote {new_state} marker for {len(plcs)} PLC(s) at {timestamp}")
+    except Exception as exc:
+        print(f"[history] failed to write {new_state} marker: {exc}")
 
 
 def _detect_and_log_transitions(groups: list[MachineGroup]) -> None:
@@ -184,9 +260,15 @@ def _poll_loop() -> None:
     — same cadence V1 used. Never lets an exception escape: a single bad
     cycle (or an unconfigured/unreachable install) must not kill the
     thread and freeze the state the API serves.
+
+    Reads data_source_mode every cycle (a cheap in-memory cache read, see
+    history.get_data_source_mode) and picks whichever source is currently
+    active — this is the ONLY place that knows demo mode exists.
+    Everything below it (priority, history logging, WS broadcast, KPI
+    endpoints) just sees MachineGroup/PlcData and never special-cases it.
     """
     while True:
-        source = _get_source()
+        source = _ensure_demo_source() if history.get_data_source_mode() == "demo" else _get_source()
         if source is None:
             _set_state({**_EMPTY_STATE, "timestamp": _now_iso()})
         else:
@@ -424,10 +506,34 @@ class HistoryClearIn(BaseModel):
     confirm: bool
 
 
+class DataSourceIn(BaseModel):
+    mode: str
+
+
+class DemoSetStateIn(BaseModel):
+    group_name: str
+    ip: str
+    state: str | None = None
+    is_online: bool | None = None
+    remaining_seconds: int | None = None
+    # None = not provided (leave unchanged); "" = explicitly clear it —
+    # see SimulatedSource.set_plc_state's docstring.
+    recipe: str | None = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     history.init_db()
-    _hydrate_state_entered_at()
+
+    # One instant shared by the startup marker and the elapsed-timer
+    # anchors, so "when this session started observing" is a single
+    # number rather than two that drift by however long startup takes.
+    # Both must happen before the poll thread starts, or its first cycle
+    # would log transitions ahead of the marker meant to precede them.
+    started_at = _now_iso()
+    _write_server_marker(history.UNKNOWN_MARKER, started_at)
+    _hydrate_state_entered_at(started_at)
+
     _set_source(_load_source())
     poll_thread = threading.Thread(target=_poll_loop, daemon=True, name="opcua-poll")
     poll_thread.start()
@@ -437,6 +543,12 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         broadcast_task.cancel()
+        # Closes the observed period, so the coming downtime is excluded
+        # from tomorrow's totals rather than credited to each machine's
+        # last-seen state. Best effort by nature — a hard power loss or
+        # kill -9 never reaches this; the UNKNOWN marker the next startup
+        # writes is the one that always lands.
+        _write_server_marker(history.SERVER_STOPPED_MARKER, _now_iso())
 
 
 app = FastAPI(title="Produktionspilot V2 API", lifespan=lifespan)
@@ -634,9 +746,37 @@ def service_recording_status(_token: str = Depends(require_level("service"))) ->
     return {"enabled": history.is_recording_enabled()}
 
 
+def _write_recording_baseline() -> None:
+    """Writes one row per currently-known PLC (old_state=None, new_state=
+    its current state) the moment recording flips OFF->ON — treats
+    "recording just started" as the first observed transition for every
+    PLC, so a session has a real starting point immediately instead of
+    waiting for a coincidental future state change. Reads the same
+    snapshot the dashboard is currently showing (get_state()), not a
+    fresh source read — "currently known" means what's on screen right
+    now. Best-effort per row: a DB hiccup must not break the toggle
+    itself (same reasoning as _detect_and_log_transitions)."""
+    for group in get_state().get("groups", []):
+        for plc in group.get("plcs", []):
+            try:
+                history.record_transition(
+                    group_name=group["name"],
+                    plc_ip=plc["ip"],
+                    unit_number=plc["unit_number"],
+                    old_state=None,
+                    new_state=plc["state"],
+                    was_online=plc["is_online"],
+                )
+            except Exception as exc:
+                print(f"[history] failed to record baseline for {plc['ip']}: {exc}")
+
+
 @app.post("/api/service/recording")
 def service_set_recording(body: RecordingIn, request: Request, _token: str = Depends(require_level("service"))) -> dict:
+    was_enabled = history.is_recording_enabled()
     history.set_recording_enabled(body.enabled)
+    if body.enabled and not was_enabled:
+        _write_recording_baseline()
     ip = request.client.host if request.client else "unknown"
     print(f"[history] recording {'enabled' if body.enabled else 'disabled'} by {ip} at {_now_iso()}")
     return {"enabled": body.enabled}
@@ -655,6 +795,79 @@ def service_clear_history(body: HistoryClearIn, request: Request, _token: str = 
 @app.get("/api/service/history/summary")
 def service_history_summary(_token: str = Depends(require_level("service"))) -> dict:
     return history.get_summary()
+
+
+# ---------------------------------------------------------------------------
+# Demo data source — lets a technician switch the whole dashboard onto
+# simulated data (for demos/training, or exercising the UI without real
+# PLCs online) and drive it from a control panel. See _poll_loop above for
+# the only place that reads data_source_mode / picks the active source;
+# these endpoints just expose that switch and the simulated state behind
+# it. All Service-level, same as the rest of this section.
+# ---------------------------------------------------------------------------
+
+_VALID_DATA_SOURCE_MODES = {"real", "demo"}
+_VALID_MACHINE_STATE_NAMES = {s.name for s in MachineState}
+
+
+@app.get("/api/service/data-source")
+def service_get_data_source(_token: str = Depends(require_level("service"))) -> dict:
+    return {"mode": history.get_data_source_mode()}
+
+
+@app.post("/api/service/data-source")
+def service_set_data_source(body: DataSourceIn, _token: str = Depends(require_level("service"))) -> dict:
+    if body.mode not in _VALID_DATA_SOURCE_MODES:
+        raise HTTPException(status_code=400, detail=f"Invalid mode: {body.mode}")
+    if body.mode == "demo":
+        # resync_clock() so a long stretch spent in Real PLCs mode (during
+        # which nothing ticks the demo source) doesn't get misread as one
+        # giant elapsed interval the moment demo mode is active again —
+        # see SimulatedSource.resync_clock's docstring.
+        _ensure_demo_source().resync_clock()
+    history.set_data_source_mode(body.mode)
+    return {"mode": body.mode}
+
+
+def _demo_state_payload(source: SimulatedSource) -> dict:
+    # Original config order (not calculated priority order, see
+    # serializers.group_to_dict) — a control panel edits fixed physical
+    # units, it shouldn't reshuffle rows as their simulated state changes.
+    return {
+        "groups": [
+            {"name": group.name, "type": group.type, "plcs": [plc.to_dict() for plc in group.plcs]}
+            for group in source.get_machines()
+        ]
+    }
+
+
+@app.get("/api/service/demo/state")
+def service_demo_state(_token: str = Depends(require_level("service"))) -> dict:
+    return _demo_state_payload(_ensure_demo_source())
+
+
+@app.post("/api/service/demo/set-state")
+def service_demo_set_state(body: DemoSetStateIn, _token: str = Depends(require_level("service"))) -> dict:
+    if history.get_data_source_mode() != "demo":
+        raise HTTPException(status_code=400, detail="Switch to Demo Mode before editing simulated state")
+    if body.state is not None and body.state not in _VALID_MACHINE_STATE_NAMES:
+        raise HTTPException(status_code=400, detail=f"Invalid state: {body.state}")
+    if body.recipe and body.recipe not in RECIPE_OPTIONS:
+        raise HTTPException(status_code=400, detail=f"Invalid recipe: {body.recipe}")
+
+    source = _ensure_demo_source()
+    try:
+        source.set_plc_state(
+            body.group_name,
+            body.ip,
+            state=body.state,
+            is_online=body.is_online,
+            remaining_seconds=body.remaining_seconds,
+            recipe=body.recipe,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return _demo_state_payload(source)
 
 
 # ---------------------------------------------------------------------------

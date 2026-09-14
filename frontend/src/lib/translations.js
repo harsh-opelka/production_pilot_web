@@ -20,19 +20,30 @@ const en = {
   // the larger text below it is built from the next_action_* keys below.
   next_action_prefix: 'Next Action',
   next_action_error: '{unit}: Check Error',
-  next_action_unload: '{unit}: Unload Soon',
-  next_action_load: '{unit}: Load Machine',
+  // A Ready machine is empty and needs loading now; an Almost Finished
+  // (near-completion BAKING) one will need loading again soon once
+  // unloaded — see nextAction.js's isNearDoneBaking/near_completion.
+  next_action_load: '{unit}: Load',
+  next_action_near_completion: '{unit}: Load Soon',
   no_action: '–',
   state_cold: 'Cold',
   state_heating: 'Heating',
-  state_ready: 'Ready',
+  // Display label only — the underlying MachineState stays READY (colour,
+  // priority logic, next-action wording all untouched). Renamed per spec
+  // so the per-machine label matches kpi_waiting's existing wording below.
+  state_ready: 'Waiting',
   state_baking: 'Baking',
   state_error: 'Error',
   state_near_completion: 'Almost finished',
   status_offline: 'Offline',
   status_online: 'Online',
   unit_fryer: 'Machine',
-  remaining_time_format: '{mins} mins {secs} secs',
+  // Shared wordy duration format used by every state timer — see
+  // formatDuration in format.js. duration_hm_format kicks in once the
+  // elapsed/remaining time reaches an hour (always "X hrs Y mins", no
+  // singular/plural variants, matching duration_ms_format's style).
+  duration_ms_format: '{mins} mins {secs} secs',
+  duration_hm_format: '{h} hrs {m} mins',
   connection_lost: 'Connection lost — waiting for OPC UA server',
   theme_dark: 'Dark',
   theme_light: 'Light',
@@ -142,6 +153,24 @@ const en = {
   service_recording_clear_confirm: 'This will permanently delete all recorded history. Continue?',
   service_recording_cleared: '{n} row(s) deleted.',
 
+  // Service page layout — section headings grouping the cards below.
+  service_section_setup: 'Setup',
+  service_section_security: 'Security',
+  service_section_data: 'Data',
+
+  service_data_source_heading: 'Data Source',
+  service_data_source_real: 'Real PLCs',
+  service_data_source_demo: 'Demo Mode',
+  service_data_source_error: 'Could not switch data source: {error}',
+  service_demo_controls_heading: 'Demo Controls',
+  service_demo_unit_col: 'Unit',
+  service_demo_state_col: 'State',
+  service_demo_recipe_col: 'Recipe',
+  service_demo_recipe_none: '–',
+  service_demo_online_col: 'Online',
+  service_demo_remaining_col: 'Remaining (s)',
+  service_demo_error: 'Could not update simulated state: {error}',
+
   stats_view_live: 'Live',
   stats_live_last_updated: 'Last updated {seconds}s ago',
   stats_live_recording_off:
@@ -166,11 +195,13 @@ const de = {
   auth_gate_incorrect: 'Falsches Passwort.',
   // Overrides de_v1's old "{group} — {fryer}" format (single-line pill) —
   // the two-tier box now shows a plain label here and "{unit}: action"
-  // below it (see next_action_prefix/error/unload/load above).
+  // below it (see next_action_prefix/error/load/near_completion above).
   next_action_prefix: 'Nächste Aktion',
   next_action_error: '{unit}: Störung prüfen',
-  next_action_unload: '{unit}: Bald entladen',
-  next_action_load: '{unit}: Maschine beladen',
+  next_action_load: '{unit}: Beladen',
+  next_action_near_completion: '{unit}: Bald beladen',
+  // Overrides de_v1's "Bereit" — same reasoning as the en export above.
+  state_ready: 'Warte',
   state_near_completion: 'Fast fertig',
   theme_dark: 'Dunkel',
   theme_light: 'Hell',
@@ -245,6 +276,23 @@ const de = {
   service_recording_clear_button: 'Verlauf löschen',
   service_recording_clear_confirm: 'Dies löscht den gesamten aufgezeichneten Verlauf dauerhaft. Fortfahren?',
   service_recording_cleared: '{n} Zeile(n) gelöscht.',
+
+  service_section_setup: 'Einrichtung',
+  service_section_security: 'Sicherheit',
+  service_section_data: 'Daten',
+
+  service_data_source_heading: 'Datenquelle',
+  service_data_source_real: 'Echte SPS',
+  service_data_source_demo: 'Demo-Modus',
+  service_data_source_error: 'Datenquelle konnte nicht gewechselt werden: {error}',
+  service_demo_controls_heading: 'Demo-Steuerung',
+  service_demo_unit_col: 'Einheit',
+  service_demo_state_col: 'Status',
+  service_demo_recipe_col: 'Rezept',
+  service_demo_recipe_none: '–',
+  service_demo_online_col: 'Online',
+  service_demo_remaining_col: 'Restzeit (s)',
+  service_demo_error: 'Simulierter Status konnte nicht aktualisiert werden: {error}',
 
   stats_view_live: 'Live',
   stats_live_last_updated: 'Zuletzt aktualisiert vor {seconds}s',

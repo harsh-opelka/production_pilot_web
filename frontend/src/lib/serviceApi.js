@@ -126,6 +126,28 @@ export function getHistorySummary() {
   return serviceFetch('/api/service/history/summary');
 }
 
+export function getDataSource() {
+  return serviceFetch('/api/service/data-source');
+}
+
+export function setDataSource(mode) {
+  return serviceFetch('/api/service/data-source', {
+    method: 'POST',
+    body: JSON.stringify({ mode }),
+  });
+}
+
+export function getDemoState() {
+  return serviceFetch('/api/service/demo/state');
+}
+
+export function setDemoPlcState(groupName, ip, changes) {
+  return serviceFetch('/api/service/demo/set-state', {
+    method: 'POST',
+    body: JSON.stringify({ group_name: groupName, ip, ...changes }),
+  });
+}
+
 export function getAvailableDates() {
   return serviceFetch('/api/stats/available-dates');
 }

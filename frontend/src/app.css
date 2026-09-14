@@ -27,16 +27,25 @@
   --state-error: #dc2626;
   --state-error-fg: #ffffff;
 
+  /* "Fast fertig"/"Almost finished" display override (BAKING with
+     remaining_seconds below the near-completion threshold — see
+     priority.is_near_completion). Its own bright, saturated warning
+     yellow, deliberately NOT --state-heating's amber-orange, so the two
+     read as clearly different states at a glance in FryerTile.svelte /
+     MachineListRow.svelte. MachineState itself stays BAKING; this is a
+     display-only colour, never sent as a machine state. */
+  --state-near-completion: #facc15;
+  --state-near-completion-fg: #1c1c1c;
+
   --offline-bg: #374151;
   --offline-fg: #e5e7eb;
   --offline-border: #94a3b8;
 
-  /* "Next action" tier backgrounds (TopBar pill). Error/Ready reuse the
-     state colours above; baking-near-completion deliberately does NOT
-     reuse --state-heating's amber — an amber "next action" banner would
-     read as "a machine is heating", not "unload soon", so it gets its
-     own distinct urgent-orange. */
-  --tier-baking-bg: #c2410c;
+  /* "Next action" tier backgrounds (TopBar pill). Error/Ready/Near-
+     completion all reuse the state colours above so the pill always
+     matches the tile it's summarizing exactly — see TopBar.svelte's
+     .tier-near-completion, which pulls --state-near-completion/-fg
+     directly rather than having its own colour. */
   --tier-none-bg: #6b7280;
 
   /* Sidebar is fixed dark navy in both themes (see task layout spec). */
@@ -51,10 +60,13 @@
 
   /* TV-scale typography: clamp() so a fixed viewport doesn't dictate
      one physical text size across the 55"-75" range this runs on. */
-  /* ~27% smaller than the original clamp(1.5rem, 2.4vw, 2.75rem) — still
-     the most prominent element in the top bar (well above --font-kpi-
-     summary's clamp(0.7rem, 0.85vw, 0.95rem) at every scale). */
-  --font-next-action: clamp(1.1rem, 1.75vw, 2rem);
+  /* Bumped up again from clamp(1.3rem, 2.1vw, 2.4rem) now that the Next
+     Action box itself grows to fill real top-bar width (see TopBar.svelte's
+     .next-action) — a much wider box with the old font size would read as
+     small text floating in empty space, so this scales up with it and is
+     now allowed to match/exceed --font-tile-state's max end; it's the
+     dashboard's headline element, not a secondary pill anymore. */
+  --font-next-action: clamp(1.6rem, 2.8vw, 3.2rem);
   /* Trimmed ~12% off the max end so "Einstellungen" (the longest nav
      label, DE) fits the sidebar on one line — see Sidebar.svelte, which
      also fixes buttons' browser-default white-space:pre (the actual
@@ -62,13 +74,24 @@
   --font-nav-item: clamp(0.95rem, 1.2vw, 1.25rem);
   --font-toggle: clamp(0.9rem, 1.1vw, 1.15rem);
   --font-group-header: clamp(1.2rem, 1.7vw, 1.9rem);
-  --font-tile-title: clamp(1.4rem, 2.1vw, 2.5rem);
   --font-tile-sub: clamp(0.85rem, 1.05vw, 1.15rem);
+  /* Tile unit number: a step up from --font-tile-sub (which the recipe
+     line still uses) so it's more readable at a glance, but deliberately
+     kept below --font-tile-time's range — font-weight is what mainly
+     separates it from State/Time (see FryerTile.svelte's .unit), so the
+     size gap only needs to be moderate, not large. */
+  --font-tile-unit: clamp(0.95rem, 1.15vw, 1.35rem);
   --font-tile-state: clamp(1.05rem, 1.4vw, 1.65rem);
   --font-tile-time: clamp(0.95rem, 1.2vw, 1.4rem);
   --font-banner: clamp(1.2rem, 1.7vw, 1.9rem);
   --font-view-toggle: clamp(0.95rem, 1.15vw, 1.25rem);
-  --font-kpi-summary: clamp(0.7rem, 0.85vw, 0.95rem);
+  /* Trimmed back down from clamp(1rem, 1.3vw, 1.5rem) now that the KPI
+     table is 4 columns wide instead of 2 (see KpiSummary.svelte) — at
+     the old size "Produktivität" (DE, the longest header) pushed the
+     table's total width uncomfortably close to wrapping in the top bar.
+     Still enlarged from the original clamp(0.7rem, 0.85vw, 0.95rem) so
+     it reads as a deliberate, legible table rather than a footnote. */
+  --font-kpi-summary: clamp(0.8rem, 1.05vw, 1.2rem);
 
   --radius: clamp(0.5rem, 0.6vw, 0.875rem);
 }

@@ -1,10 +1,19 @@
 import { translate } from './translations.js';
 
-export function formatRemaining(seconds, language) {
-  const total = Math.max(0, seconds ?? 0);
+// Single wordy duration formatter shared by every state timer (Baking's
+// countdown and the live elapsed timers for Cold/Heating/Waiting/Error) —
+// "X Min. Y Sek." under an hour, "X Std. Y Min." once it reaches an hour,
+// so long-running states don't degrade into an unbroken run of minutes.
+export function formatDuration(seconds, language) {
+  const total = Math.max(0, Math.floor(seconds ?? 0));
+  if (total >= 3600) {
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    return translate(language, 'duration_hm_format', { h, m });
+  }
   const mins = Math.floor(total / 60);
   const secs = total % 60;
-  return translate(language, 'remaining_time_format', { mins, secs });
+  return translate(language, 'duration_ms_format', { mins, secs });
 }
 
 export function formatUnitLabel(unitNumber, language) {
@@ -27,18 +36,6 @@ export function stateLabel(plc, language) {
   if (plc.near_completion) return translate(language, 'state_near_completion');
   const key = `state_${plc.state.toLowerCase()}`;
   return translate(language, key);
-}
-
-// Live elapsed-time timer (COLD/HEATING/READY/ERROR tiles) — counts UP
-// from a server-provided state_entered_at timestamp. MM:SS under an hour,
-// HH:MM:SS beyond it.
-export function formatElapsed(seconds) {
-  const total = Math.max(0, Math.floor(seconds));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  const pad = (n) => String(n).padStart(2, '0');
-  return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
 }
 
 export function formatHoursMinutes(seconds, language) {
