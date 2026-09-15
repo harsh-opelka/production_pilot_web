@@ -68,7 +68,11 @@
 
   .kpi-summary th,
   .kpi-summary td {
-    padding: clamp(0.2rem, 0.5vh, 0.4rem) clamp(0.5rem, 1.1vw, 1rem);
+    /* Padding bumped up (from clamp(0.2rem, 0.5vh, 0.4rem) /
+       clamp(0.5rem, 1.1vw, 1rem)) alongside --font-kpi-summary — see
+       app.css's comment on that token for why: the table was reading as
+       too small for the unused width next to it in the top bar. */
+    padding: clamp(0.35rem, 0.85vh, 0.6rem) clamp(0.85rem, 1.8vw, 1.6rem);
     white-space: nowrap;
     text-align: center;
     border-right: 1px solid var(--border-color);

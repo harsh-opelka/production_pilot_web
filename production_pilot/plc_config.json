@@ -1,7 +1,7 @@
 {
   "machines": [
     {
-      "name": "Quoattro Raisch",
+      "name": "Quattro",
       "type": "QUATTRO",
       "plcs": [
         "192.168.178.150",

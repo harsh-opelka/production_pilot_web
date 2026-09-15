@@ -60,6 +60,31 @@ _db_lock = threading.Lock()
 _recording_enabled = False  # cache; authoritative value lives in app_settings
 _data_source_mode = _DEFAULT_DATA_SOURCE_MODE  # cache; authoritative value lives in app_settings
 
+# This PROCESS's own start instant (ISO UTC string, history's fixed-width
+# format) — set once by server.py's lifespan startup handler, live only in
+# memory so a restart naturally forgets it (that's the point: "today" for
+# KPI purposes should start over from whenever this session began
+# observing, not from a value that would itself survive a restart). Never
+# persisted to app_settings on purpose. Deliberately independent of the
+# recording toggle and of the UNKNOWN marker row (record_server_marker is
+# a no-op while recording is off, so that row may not exist at all) — see
+# stats.compute_daily_summary, the only reader.
+_server_started_at: str | None = None
+
+
+def set_server_started_at(timestamp: str) -> None:
+    """Called once per process, from server.py's lifespan, with the same
+    instant used for the UNKNOWN marker/elapsed-timer hydration — see
+    that call site for why all three share one timestamp."""
+    global _server_started_at
+    _server_started_at = timestamp
+
+
+def get_server_started_at() -> str | None:
+    """None only before set_server_started_at has ever run (e.g. a test
+    importing this module directly without going through server.py)."""
+    return _server_started_at
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime(_TIMESTAMP_FORMAT)

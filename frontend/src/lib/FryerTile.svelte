@@ -3,8 +3,14 @@
   // + MachineListRow.svelte), not a mode of this tile.
   import { formatDuration, formatUnitNumber, stateLabel } from './format.js';
   import { nowTick } from './stores.js';
+  import { translate } from './translations.js';
 
-  let { plc, language = 'en' } = $props();
+  // isNext/tier: whether this tile is the single machine the Next Action
+  // banner currently points at, and which tier drove that pick (see
+  // TopBar.svelte + nextAction.js — this never recomputes priority itself,
+  // just mirrors the same computeNextAction() result the caller already
+  // has). tier is only meaningful when isNext is true.
+  let { plc, language = 'en', isNext = false, tier = null } = $props();
 
   // "Fast fertig"/"Almost finished" override: its own bright warning-
   // yellow token (--state-near-completion), distinct from HEATING's
@@ -27,9 +33,14 @@
   let tileStyle = $derived(
     plc.is_online ? `--tile-bg: var(--state-${stateKey}); --tile-fg: var(--state-${stateKey}-fg);` : '',
   );
+  // Only meaningful (and only applied) while isNext is true — see .tile.next-priority.tier-* below.
+  let tierClass = $derived(isNext && tier ? `tier-${tier}` : '');
 </script>
 
-<div class="tile" class:offline={!plc.is_online} style={tileStyle}>
+<div class="tile {tierClass}" class:offline={!plc.is_online} class:next-priority={isNext} style={tileStyle}>
+  {#if isNext}
+    <div class="next-badge">{translate(language, 'tile_next_badge')}</div>
+  {/if}
   <div class="unit">{unitLabel}</div>
   <div class="middle">
     <div class="state">{label}</div>
@@ -51,10 +62,18 @@
   .tile {
     --tile-bg: var(--offline-bg);
     --tile-fg: var(--offline-fg);
+    position: relative;
     background: var(--tile-bg);
     color: var(--tile-fg);
-    border-radius: var(--radius);
-    border: 2px solid transparent;
+    border-radius: var(--tile-radius);
+    /* No visible border on colored state tiles — --tile-shadow (theme-
+       dependent, see app.css) provides the separation from --bg-app and
+       neighbouring tiles instead: a soft outer drop shadow plus a faint
+       inset top-edge highlight ("Option A" subtle depth) — both flat
+       box-shadow layers, deliberately no gradient/gloss overlay, so the
+       state colour itself stays exactly as flat and solid as before. */
+    border: none;
+    box-shadow: var(--tile-shadow);
     height: clamp(13.75rem, 22vh, 16.25rem);
     padding: clamp(0.75rem, 1.5vw, 1.5rem);
     display: grid;
@@ -68,6 +87,50 @@
     color: var(--offline-fg);
     border: 2px dashed var(--offline-border);
     opacity: 0.5;
+  }
+
+  /* Top-priority highlight — the one tile matching the Next Action banner
+     (see FryerTile's isNext/tier props + Dashboard.svelte). Coloured
+     border + soft halo, using the exact same colour as the banner's
+     tier-* background (TopBar.svelte) so the two always agree. Only ever
+     one tile at a time carries this, since isNext is derived from the
+     single computeNextAction() result the whole dashboard shares. */
+  .tile.next-priority {
+    border: 3px solid var(--tile-accent, transparent);
+    box-shadow:
+      var(--tile-shadow),
+      0 0 0 6px var(--tile-accent-glow, transparent);
+  }
+
+  .tile.next-priority.tier-error {
+    --tile-accent: var(--state-error);
+    --tile-accent-glow: rgba(220, 38, 38, 0.35);
+  }
+
+  .tile.next-priority.tier-near-completion {
+    --tile-accent: var(--state-near-completion);
+    --tile-accent-glow: rgba(250, 204, 21, 0.4);
+  }
+
+  .tile.next-priority.tier-ready {
+    --tile-accent: var(--opelka-blue);
+    --tile-accent-glow: rgba(5, 52, 108, 0.35);
+  }
+
+  .next-badge {
+    position: absolute;
+    top: -0.6rem;
+    left: -0.6rem;
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    background: var(--tile-accent, var(--opelka-blue));
+    color: #ffffff;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+    z-index: 1;
   }
 
   .unit {

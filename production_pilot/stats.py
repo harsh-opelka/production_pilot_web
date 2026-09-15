@@ -20,6 +20,14 @@ Duration-walk rules (see compute_daily_summary):
     This is what lets a PLC that, say, has been READY since three days
     ago and never transitioned again show the full day as ready_seconds
     instead of zero.
+  - TODAY ONLY, that "00:00:00 local" start boundary itself slides
+    forward to this process's own startup instant whenever that's later
+    than local midnight (see history.get_server_started_at) — every
+    restart makes today's totals start accumulating fresh from the
+    moment the server came back up, rather than from midnight or from
+    whatever had already accumulated pre-restart. Any date strictly
+    before today is a closed historical day and always keeps the plain
+    midnight-to-midnight boundary, completely unaffected by restarts.
   - A segment's duration runs from its own start to the NEXT segment's
     start, for the same PLC.
   - was_online == 0 always counts as offline_seconds, regardless of
@@ -121,16 +129,36 @@ def _day_start(date: str) -> datetime:
 
 
 def compute_daily_summary(date: str) -> dict:
-    rows = history.get_daily_transitions(date)
+    is_today = date == today_local()
     day_start = _day_start(date)
     day_end = day_start + timedelta(days=1)  # this day's own midnight-to-midnight cap
 
-    # Per-PLC state as of exactly 00:00:00 on `date`, carried over from
-    # before the day started — a synthetic anchor, not a real row (see
+    # TODAY ONLY: the day's own effective start slides forward to this
+    # process's own startup instant, if that's later than local midnight —
+    # every restart makes "today" start accumulating fresh from that
+    # moment instead of from 00:00:00 (see history.get_server_started_at's
+    # docstring). Any date strictly before today always keeps the plain
+    # midnight boundary computed above — a closed historical day is never
+    # touched by this, regardless of when the server happens to restart.
+    if is_today:
+        started_at = history.get_server_started_at()
+        if started_at is not None:
+            day_start = max(day_start, _parse(started_at))
+    day_start_str = day_start.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # Rows are fetched for the full calendar day (get_daily_transitions is
+    # unaware of the restart boundary), then trimmed to day_start — a
+    # no-op for any non-today date, since day_start there is still exactly
+    # local midnight.
+    rows = [row for row in history.get_daily_transitions(date) if row["timestamp"] >= day_start_str]
+
+    # Per-PLC state as of exactly `day_start` (local midnight, or — today,
+    # post-restart — this session's startup instant), carried over from
+    # before that instant — a synthetic anchor, not a real row (see
     # get_last_transition_before). Lets a PLC that had zero transitions
-    # on this day but was already in some state still get credited for
-    # however long it sat in that state.
-    carry_over = history.get_last_transition_before(day_start.strftime("%Y-%m-%dT%H:%M:%SZ"))
+    # since `day_start` but was already in some state still get credited
+    # for however long it sat in that state.
+    carry_over = history.get_last_transition_before(day_start_str)
 
     by_plc: dict[str, list[dict]] = {}
     for row in rows:
@@ -139,7 +167,6 @@ def compute_daily_summary(date: str) -> dict:
     if not by_plc and not carry_over:
         return {"date": date, "machines": []}
 
-    is_today = date == today_local()
     now = datetime.now(timezone.utc)
 
     machines = []

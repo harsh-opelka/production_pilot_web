@@ -2,8 +2,15 @@
   import { machinesState, view, lang, auth } from './stores.js';
   import { todayLocalDate } from './format.js';
   import { getDailySummary } from './serviceApi.js';
+  import { computeNextAction } from './nextAction.js';
   import MachineGroupSection from './MachineGroupSection.svelte';
   import ViewToggle from './ViewToggle.svelte';
+  import StateLegend from './StateLegend.svelte';
+
+  // Same computeNextAction() call TopBar.svelte uses for the Next Action
+  // banner text/colour — reused here (not re-derived) purely to know which
+  // single plc.ip to highlight on the matching tile, see MachineGroupSection.
+  let nextAction = $derived(computeNextAction($machinesState.groups, $lang));
 
   const PRODUCTIVITY_REFRESH_MS = 60_000;
 
@@ -33,12 +40,20 @@
 
 <div class="dashboard">
   <div class="toolbar">
+    <StateLegend language={$lang} />
     <ViewToggle />
   </div>
 
   <div class="groups">
     {#each $machinesState.groups as group (group.name)}
-      <MachineGroupSection {group} mode={$view} language={$lang} {productivityByIp} />
+      <MachineGroupSection
+        {group}
+        mode={$view}
+        language={$lang}
+        {productivityByIp}
+        nextActionIp={nextAction.ip}
+        nextActionTier={nextAction.tier}
+      />
     {/each}
   </div>
 </div>
@@ -52,9 +67,17 @@
     overflow: hidden;
   }
 
+  /* Legend (see StateLegend.svelte) and the Block/List toggle grouped
+     together on the right side of this row, legend first then the
+     toggle immediately after it — not spread across the full width.
+     wrap so a narrow viewport/high --ui-scale stacks the toggle onto its
+     own line under the legend rather than crushing either. */
   .toolbar {
     display: flex;
+    flex-wrap: wrap;
+    align-items: center;
     justify-content: flex-end;
+    gap: clamp(0.5rem, 1.2vh, 0.85rem) clamp(1rem, 2vw, 2rem);
     margin-bottom: clamp(0.75rem, 1.5vh, 1.5rem);
     flex-shrink: 0;
   }

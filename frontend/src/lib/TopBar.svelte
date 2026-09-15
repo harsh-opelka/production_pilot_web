@@ -1,23 +1,39 @@
 <script>
   import logo from '../assets/opelka_logo.png';
-  import { machinesState, lang, page } from './stores.js';
+  import { machinesState, lang, page, auth, sidebarOpen } from './stores.js';
   import { translate } from './translations.js';
   import { computeNextAction } from './nextAction.js';
   import AuthGate from './AuthGate.svelte';
   import KpiSummary from './KpiSummary.svelte';
 
   let nextAction = $derived(computeNextAction($machinesState.groups, $lang));
+
+  // bind:this target for AuthGate below — the login trigger used to be a
+  // standalone hamburger button (see AuthGate.svelte's history); now it's
+  // the Opelka logo itself, so TopBar calls straight into AuthGate's
+  // exported openGate() instead of AuthGate rendering its own button.
+  let authGate;
+
+  // Not authenticated yet -> the logo starts the login flow (unchanged).
+  // Already authenticated -> the logo purely toggles sidebar visibility
+  // (see stores.js's sidebarOpen) and never re-prompts for the password —
+  // closing/reopening the sidebar must not look like logging out. See
+  // serviceApi.js's login()/logout() for where sidebarOpen itself gets
+  // set true/false.
+  function handleLogoClick() {
+    if ($auth.token) {
+      sidebarOpen.update((open) => !open);
+    } else {
+      authGate.openGate();
+    }
+  }
 </script>
 
 <header class="topbar">
-  <div class="left-group">
-    <AuthGate />
-
-    <div class="next-action">
-      <div class="next-action-box tier-{nextAction.tier}">
-        <span class="na-label">{translate($lang, 'next_action_prefix')}</span>
-        <span class="na-content">{nextAction.text}</span>
-      </div>
+  <div class="next-action">
+    <div class="next-action-box tier-{nextAction.tier}">
+      <span class="na-label">{translate($lang, 'next_action_prefix')}</span>
+      <span class="na-content">{nextAction.text}</span>
     </div>
   </div>
 
@@ -26,10 +42,21 @@
       <KpiSummary />
     {/if}
 
-    <div class="logo-panel">
+    <!-- Always clickable now — see handleLogoClick above for the two
+         behaviors (start login vs. toggle the sidebar) depending on
+         whether a session is already authenticated. -->
+    <button
+      type="button"
+      class="logo-panel logo-button"
+      onclick={handleLogoClick}
+      aria-label={translate($lang, 'menu_tooltip')}
+      title={translate($lang, 'menu_tooltip')}
+    >
       <img src={logo} alt="Opelka" />
-    </div>
+    </button>
   </div>
+
+  <AuthGate bind:this={authGate} />
 </header>
 
 <style>
@@ -37,15 +64,14 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    /* Exactly two top-level flex children now (.left-group, .right-group)
-       — with only two items, space-between puts the ENTIRE leftover gap
-       in the one place it belongs: between the two groups. Previously
-       .next-action sat here as its own direct (3rd) flex child next to
-       .right-group; once its flex-grow hit max-width, the leftover space
-       space-between had to place got split into TWO gaps (either side of
-       it), which visibly dragged the whole block off the left edge
-       toward the middle on wide viewports/high --ui-scale — see
-       .left-group below for the fix. */
+    /* Exactly two top-level flex children (.next-action, .right-group) —
+       with only two items, space-between puts the ENTIRE leftover gap in
+       the one place it belongs: between them. The login-gate button used
+       to sit alongside .next-action in a shared .left-group wrapper,
+       which is why .next-action itself couldn't just be flex:1 1 auto
+       directly — that grouping is gone now that AuthGate lives in
+       .right-group instead (see the template above), so .next-action is
+       free to sit here on its own and align fully left. */
     justify-content: space-between;
     background: var(--bg-topbar);
     border-bottom: 1px solid var(--border-color);
@@ -53,40 +79,20 @@
     /* Row-gap (wrap fallback) and column-gap both bumped up from the
        previous clamp(0.5rem, 1vh, 1rem)/clamp(0.75rem, 1.5vw, 1.5rem) —
        gap is a floor space-between adds on top of, not a ceiling, so
-       raising it keeps .left-group/.right-group from ever crowding
+       raising it keeps .next-action/.right-group from ever crowding
        together even when there's little leftover space to distribute. */
     gap: clamp(0.75rem, 2vh, 1.5rem) clamp(1.25rem, 2.5vw, 2.5rem);
     flex-shrink: 0;
   }
 
-  /* Hamburger icon + Next Action block as ONE left-anchored unit — see
-     .topbar's comment above for why this grouping exists. flex-grow: 1
-     (topbar-level) so this still claims the leftover width up to
-     .right-group, same as before; the growth is then handed down to
-     .next-action's OWN flex-grow (left-group-level) below, so it's
-     .next-action that visibly widens while the hamburger stays fixed-size
-     right at the left edge — never space distributed around either of
-     them. justify-content is deliberately left at its flex-start default:
-     any width .next-action's max-width can't absorb just trails as blank
-     space after it (still inside/before .right-group), not as a gap
-     that would push .next-action away from the hamburger. */
-  .left-group {
-    flex: 1 1 auto;
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: clamp(0.75rem, 1.2vw, 1.25rem);
-  }
-
-  /* flex-grow: 1 (relative to .left-group, see above) so this fills the
-     leftover space next to the hamburger icon instead of hugging its own
-     text — a deliberate reversal of the previous fit-content sizing, now
-     that the box needs real presence rather than a small pill. flex-basis
-     20rem is just a sane starting point before growth; the generous
-     max-width still caps it well short of .right-group so the two never
-     collide, and flex-shrink: 1 + na-content's overflow-wrap still let it
-     wrap onto its own full-width row (via .topbar's flex-wrap) rather
-     than being squeezed to a sliver at high --ui-scale. */
+  /* flex-grow: 1 so this claims the leftover width up to .right-group,
+     widening the block itself rather than leaving blank space next to a
+     fixed-size neighbor (there is none now — see .topbar's comment).
+     flex-basis 20rem is just a sane starting point before growth; the
+     generous max-width still caps it well short of .right-group so the
+     two never collide, and flex-shrink: 1 + na-content's overflow-wrap
+     still let it wrap onto its own full-width row (via .topbar's
+     flex-wrap) rather than being squeezed to a sliver at high --ui-scale. */
   .next-action {
     flex: 1 1 20rem;
     min-width: 0;
@@ -94,15 +100,15 @@
     display: flex;
   }
 
-  /* KPI table + logo as one flex item: at low viewport width / high
-     --ui-scale, when this doesn't fit next to .left-group, the whole
-     group wraps to its own row together (via .topbar's flex-wrap)
-     instead of the KPI table wrapping alone and ending up squeezed
-     under Next Action while the logo stays put — see task spec: "KPI
-     table should sit clearly to the right side of the bar". The
-     explicit gap here is a floor for KPI-to-logo spacing that doesn't
-     depend on how much leftover width .topbar's space-between has to
-     distribute. */
+  /* KPI table + logo (+ the login-gate button, pre-login) as one flex
+     item: at low viewport width / high --ui-scale, when this doesn't fit
+     next to .next-action, the whole group wraps to its own row together
+     (via .topbar's flex-wrap) instead of the KPI table wrapping alone and
+     ending up squeezed under Next Action while the logo stays put — see
+     task spec: "KPI table should sit clearly to the right side of the
+     bar". The explicit gap here is a floor for spacing between these
+     items that doesn't depend on how much leftover width .topbar's
+     space-between has to distribute. */
   .right-group {
     flex: 0 1 auto;
     min-width: 0;
@@ -181,5 +187,29 @@
   .logo-panel img {
     height: clamp(1.75rem, 4vh, 3.25rem);
     width: auto;
+  }
+
+  /* Pre-login only (see the {#if !$auth.token} above) — the logo itself
+     is the only click target now, so this is a plain <button> reset down
+     to .logo-panel's own look (no border/background chrome of its own)
+     plus a minimal, deliberately subtle hover/focus affordance: a soft
+     ring (reads as a faint tint against the white logo panel, not a
+     gradient/glow) and a slight scale. Nothing shows at rest — it should
+     still read primarily as a logo, not a button. */
+  .logo-button {
+    border: none;
+    font: inherit;
+    cursor: pointer;
+    transition: box-shadow 0.15s ease, transform 0.15s ease;
+  }
+
+  .logo-button:hover {
+    box-shadow: 0 0 0 3px rgba(5, 52, 108, 0.12);
+    transform: scale(1.03);
+  }
+
+  .logo-button:focus-visible {
+    outline: 2px solid var(--opelka-blue);
+    outline-offset: 2px;
   }
 </style>

@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { theme, page, uiScale, auth } from './lib/stores.js';
+  import { theme, page, uiScale, auth, sidebarOpen } from './lib/stores.js';
   import { fetchInitialState, connectWebSocket } from './lib/websocket.js';
   import Sidebar from './lib/Sidebar.svelte';
   import TopBar from './lib/TopBar.svelte';
@@ -28,12 +28,16 @@
     if (!$auth.token) page.set('dashboard');
   });
 
-  // 'service' and 'settings' are only ever reachable via a Service-level
-  // sidebar (see Sidebar.svelte) — if the level drops to Management (or
-  // below) while sitting on either, fall back to Dashboard rather than
-  // rendering a page whose nav item is now gone.
+  // 'service' is only ever reachable via a Service-level sidebar (see
+  // Sidebar.svelte); 'settings' is reachable at Management or Service
+  // level (both levels show it — see Sidebar.svelte). If the level drops
+  // below what a page requires while sitting on it (e.g. Service ->
+  // Management), fall back to Dashboard rather than rendering a page
+  // whose nav item is now gone.
   $effect(() => {
-    if ($auth.level !== 'service' && ($page === 'service' || $page === 'settings')) {
+    if ($page === 'service' && $auth.level !== 'service') {
+      page.set('dashboard');
+    } else if ($page === 'settings' && $auth.level !== 'service' && $auth.level !== 'management') {
       page.set('dashboard');
     }
   });
@@ -46,7 +50,7 @@
 
 <div class="app">
   <div class="body">
-    {#if $auth.token}
+    {#if $auth.token && $sidebarOpen}
       <Sidebar />
     {/if}
     <div class="main">

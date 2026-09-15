@@ -85,15 +85,23 @@
   --font-tile-time: clamp(0.95rem, 1.2vw, 1.4rem);
   --font-banner: clamp(1.2rem, 1.7vw, 1.9rem);
   --font-view-toggle: clamp(0.95rem, 1.15vw, 1.25rem);
-  /* Trimmed back down from clamp(1rem, 1.3vw, 1.5rem) now that the KPI
-     table is 4 columns wide instead of 2 (see KpiSummary.svelte) — at
-     the old size "Produktivität" (DE, the longest header) pushed the
-     table's total width uncomfortably close to wrapping in the top bar.
-     Still enlarged from the original clamp(0.7rem, 0.85vw, 0.95rem) so
-     it reads as a deliberate, legible table rather than a footnote. */
-  --font-kpi-summary: clamp(0.8rem, 1.05vw, 1.2rem);
+  /* Sized back up from clamp(0.8rem, 1.05vw, 1.2rem): with the hamburger
+     button moved out of .next-action's row (see TopBar.svelte), the top
+     bar's right side had real unused width next to the logo that made
+     this table read as too small for the room available. Still well
+     below --font-next-action's range so the hierarchy against the
+     headline Next Action block stays intact — this fills the top bar's
+     space more evenly without competing for visual weight with it. */
+  --font-kpi-summary: clamp(1rem, 1.3vw, 1.55rem);
 
   --radius: clamp(0.5rem, 0.6vw, 0.875rem);
+
+  /* Block-view tile shape only (FryerTile.svelte) — deliberately its own
+     token rather than reusing --radius above, since --radius also drives
+     the Next Action box/logo panel/table-wrap and this task is scoped to
+     tile styling only. ~14-16px at the default --ui-scale, in rem so it
+     still scales with the Display Size slider like the rest of the tile. */
+  --tile-radius: 0.9rem;
 }
 
 :root[data-theme='dark'] {
@@ -106,6 +114,18 @@
   --border-color: #334155;
   --accent: var(--opelka-blue);
   --logo-panel-bg: #ffffff;
+
+  /* "Option A" subtle depth (see FryerTile.svelte's .tile) — a soft drop
+     shadow plus a faint inner top-edge highlight, both flat box-shadow
+     layers (no gradients/gloss — the tile's own background stays a flat
+     solid colour). A plain drop shadow all but disappears against this
+     dark a background, so the dark variant's outer layer is both larger
+     and considerably more opaque (0.6 vs. light's 0.18) than light's —
+     purely to keep tiles visually separated from --bg-app and from each
+     other; the inset top highlight is the same value in both themes. */
+  --tile-shadow:
+    0 4px 14px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
 :root[data-theme='light'] {
@@ -118,6 +138,13 @@
   --border-color: #cbd5e1;
   --accent: var(--opelka-blue);
   --logo-panel-bg: #ffffff;
+
+  /* "Option A" subtle depth (see the dark theme block's comment above for
+     the full rationale) — soft drop shadow + faint inset top-edge
+     highlight, exactly the values given for Light theme. */
+  --tile-shadow:
+    0 4px 10px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
 /* ---------------------------------------------------------------------

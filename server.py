@@ -531,6 +531,7 @@ async def lifespan(app: FastAPI):
     # Both must happen before the poll thread starts, or its first cycle
     # would log transitions ahead of the marker meant to precede them.
     started_at = _now_iso()
+    history.set_server_started_at(started_at)
     _write_server_marker(history.UNKNOWN_MARKER, started_at)
     _hydrate_state_entered_at(started_at)
 

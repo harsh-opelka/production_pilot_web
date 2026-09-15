@@ -4,7 +4,8 @@
   import MachineListRow from './MachineListRow.svelte';
   import { translate } from './translations.js';
 
-  let { group, mode = 'block', language = 'en', productivityByIp = {} } = $props();
+  let { group, mode = 'block', language = 'en', productivityByIp = {}, nextActionIp = null, nextActionTier = null } =
+    $props();
 </script>
 
 <section class="group">
@@ -14,7 +15,7 @@
     <div class="tiles block">
       {#each group.plcs as plc (plc.ip)}
         <div animate:flip={{ duration: 300 }}>
-          <FryerTile {plc} {language} />
+          <FryerTile {plc} {language} isNext={plc.ip === nextActionIp} tier={nextActionTier} />
         </div>
       {/each}
     </div>
@@ -48,7 +49,9 @@
   .group-header {
     font-size: var(--font-group-header);
     font-weight: 700;
-    margin: 0 0 clamp(0.5rem, 1vh, 1rem);
+    /* Bumped up from clamp(0.5rem, 1vh, 1rem) for noticeably more
+       breathing room between the group name and its row of tiles. */
+    margin: 0 0 clamp(1.25rem, 2.75vh, 2.25rem);
     color: var(--text-primary);
   }
 

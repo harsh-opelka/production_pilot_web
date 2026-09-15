@@ -213,6 +213,52 @@ def test_ungraceful_shutdown_no_server_stopped_row() -> list[bool]:
     return results
 
 
+def test_today_restart_boundary() -> list[bool]:
+    print()
+    print("--- today's restart boundary (server_started_at) ---")
+    _fresh_db()
+    results = []
+    today = stats.today_local()
+    today_start = history.local_day_start_utc(today)
+    restart_at = _ts(today_start, hours=1)
+
+    with sqlite3.connect(history.DB_PATH) as conn:
+        # Pre-restart: READY starting 40 minutes before the simulated
+        # restart instant (today_start+01:00) -- this must be discarded
+        # entirely, not folded into today's ready_seconds.
+        _insert(conn, timestamp=_ts(today_start, minutes=20), old_state="COLD", new_state="READY")
+        # Post-restart, as the poll loop's own first cycles would log:
+        # carried-over READY until the first real transition, then BAKING,
+        # then COLD (left open so its duration depends on "now" and isn't
+        # asserted here).
+        _insert(conn, timestamp=_ts(today_start, hours=1, minutes=30), old_state="READY", new_state="BAKING")
+        _insert(conn, timestamp=_ts(today_start, hours=2), old_state="BAKING", new_state="COLD")
+        conn.commit()
+
+    history.set_server_started_at(restart_at)
+    m = _machine(stats.compute_daily_summary(today))
+    results.append(_check("ready_seconds == 30min (restart -> first post-restart transition only)",
+                          m["ready_seconds"], 30 * 60))
+    results.append(_check("baking_seconds == 30min (01:30 -> 02:00, unaffected once past the boundary)",
+                          m["baking_seconds"], 30 * 60))
+
+    # A past date must never be subject to the restart boundary, even if
+    # a (bogus, for this test) server_started_at instant falls inside it.
+    _fresh_db()
+    day2_start = history.local_day_start_utc(DAY2)
+    with sqlite3.connect(history.DB_PATH) as conn:
+        _insert(conn, timestamp=_ts(day2_start, minutes=-10), old_state="COLD", new_state="READY")
+        _insert(conn, timestamp=_ts(day2_start, hours=8), old_state="READY", new_state="BAKING")
+        conn.commit()
+    history.set_server_started_at(_ts(day2_start, hours=12))
+    m2 = _machine(stats.compute_daily_summary(DAY2))
+    results.append(_check("past date ready_seconds == 8h (restart boundary ignored for non-today dates)",
+                          m2["ready_seconds"], 8 * 3600))
+    results.append(_check("past date baking_seconds == 16h (restart boundary ignored for non-today dates)",
+                          m2["baking_seconds"], 16 * 3600))
+    return results
+
+
 def main() -> bool:
     results = []
     for scenario in (
@@ -220,6 +266,7 @@ def main() -> bool:
         test_downtime_excluded_within_a_day,
         test_downtime_carried_over_midnight,
         test_ungraceful_shutdown_no_server_stopped_row,
+        test_today_restart_boundary,
     ):
         results.extend(scenario())
 

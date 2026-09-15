@@ -111,6 +111,48 @@
     groups = groups.filter((_, i) => i !== index);
   }
 
+  // --- Rename an existing group ----------------------------------------
+  // Local-only, same as create/remove above: the rename lands in `groups`
+  // immediately (so the card re-renders with its new name right away),
+  // but only reaches plc_config.json on the next "Save Configuration"
+  // click via performSave's full-array POST — there's no separate
+  // immediate-write path, for consistency with every other edit in this
+  // panel. Since performSave always sends the whole `groups` array
+  // (not a diff), the existing /api/service/config endpoint already
+  // persists a renamed group's plcs/type/priority order untouched —
+  // nothing needed there.
+  let renamingIndex = $state(/** @type {number | null} */ (null));
+  let renameValue = $state('');
+  let renameError = $state('');
+
+  function startRename(index) {
+    renamingIndex = index;
+    renameValue = groups[index].name;
+    renameError = '';
+  }
+
+  function cancelRename() {
+    renamingIndex = null;
+    renameError = '';
+  }
+
+  function confirmRename() {
+    const trimmed = renameValue.trim();
+    if (!trimmed) {
+      renameError = translate($lang, 'wizard_name_required_msg');
+      return;
+    }
+    const index = renamingIndex;
+    groups = groups.map((g, i) => (i === index ? { ...g, name: trimmed } : g));
+    renamingIndex = null;
+    renameError = '';
+  }
+
+  function renameKeydown(event) {
+    if (event.key === 'Enter') confirmRename();
+    else if (event.key === 'Escape') cancelRename();
+  }
+
   function requestSave() {
     // Saving zero groups clears plc_config.json entirely — destructive
     // enough (dashboard goes blank until reconfigured) to confirm first,
@@ -283,11 +325,54 @@
             {#each groups as group, index (group.name + index)}
               <div class="group-card">
                 <div class="group-card-header">
-                  <h3>{group.name} <span class="group-type">({group.type})</span></h3>
-                  <button class="secondary" onclick={() => removeGroup(index)}>
-                    {translate($lang, 'wizard_remove_button')}
-                  </button>
+                  {#if renamingIndex === index}
+                    <div class="rename-form">
+                      <input
+                        type="text"
+                        bind:value={renameValue}
+                        placeholder={translate($lang, 'wizard_rename_placeholder')}
+                        onkeydown={renameKeydown}
+                      />
+                      <button
+                        type="button"
+                        class="icon-button rename-icon confirm"
+                        onclick={confirmRename}
+                        aria-label={translate($lang, 'wizard_confirm_button')}
+                        title={translate($lang, 'wizard_confirm_button')}
+                      >
+                        ✓
+                      </button>
+                      <button
+                        type="button"
+                        class="icon-button rename-icon"
+                        onclick={cancelRename}
+                        aria-label={translate($lang, 'cancel')}
+                        title={translate($lang, 'cancel')}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  {:else}
+                    <h3>{group.name} <span class="group-type">({group.type})</span></h3>
+                    <div class="group-card-actions">
+                      <button
+                        type="button"
+                        class="icon-button rename-icon"
+                        onclick={() => startRename(index)}
+                        aria-label={translate($lang, 'wizard_rename_button')}
+                        title={translate($lang, 'wizard_rename_button')}
+                      >
+                        ✎
+                      </button>
+                      <button class="secondary" onclick={() => removeGroup(index)}>
+                        {translate($lang, 'wizard_remove_button')}
+                      </button>
+                    </div>
+                  {/if}
                 </div>
+                {#if renamingIndex === index && renameError}
+                  <p class="error rename-error">{renameError}</p>
+                {/if}
                 <ol class="group-ips">
                   {#each group.plcs as ip (ip)}
                     <li>{ip}</li>
@@ -599,6 +684,49 @@
 
   .group-card-header button {
     padding: 0.3rem 0.7rem;
+    font-size: calc(var(--font-toggle) * 0.85);
+  }
+
+  .group-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-shrink: 0;
+  }
+
+  .rename-icon {
+    padding: 0.2rem 0.45rem;
+    font-size: 0.95rem;
+    color: var(--text-secondary);
+    border-radius: var(--radius);
+  }
+
+  .rename-icon:hover {
+    color: var(--text-primary);
+    background: var(--bg-panel);
+  }
+
+  .rename-icon.confirm {
+    color: var(--state-baking);
+  }
+
+  .rename-form {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .rename-form input {
+    flex: 1;
+    min-width: 0;
+    padding: 0.3rem 0.5rem;
+    font-size: var(--font-toggle);
+  }
+
+  .rename-error {
+    margin: 0.35rem 0 0;
     font-size: calc(var(--font-toggle) * 0.85);
   }
 

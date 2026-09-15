@@ -26,6 +26,9 @@ const en = {
   next_action_load: '{unit}: Load',
   next_action_near_completion: '{unit}: Load Soon',
   no_action: '–',
+  // Small corner badge on the one MachineTile matching the Next Action
+  // banner (see FryerTile.svelte's isNext prop).
+  tile_next_badge: 'Next',
   state_cold: 'Cold',
   state_heating: 'Heating',
   // Display label only — the underlying MachineState stays READY (colour,
@@ -134,6 +137,8 @@ const en = {
   wizard_move_down_button: 'Move Down',
   wizard_name_required_msg: 'Please enter a name for this machine.',
   wizard_no_machines: 'No machines created yet.',
+  wizard_rename_button: 'Rename',
+  wizard_rename_placeholder: 'New machine name',
   wizard_remove_button: 'Remove',
   wizard_save_button: 'Save Configuration',
   wizard_confirm_button: 'Confirm',
@@ -200,6 +205,7 @@ const de = {
   next_action_error: '{unit}: Störung prüfen',
   next_action_load: '{unit}: Beladen',
   next_action_near_completion: '{unit}: Bald beladen',
+  tile_next_badge: 'Nächste',
   // Overrides de_v1's "Bereit" — same reasoning as the en export above.
   state_ready: 'Warte',
   state_near_completion: 'Fast fertig',
@@ -260,6 +266,8 @@ const de = {
   service_scan_error: 'Netzwerk-Scan fehlgeschlagen: {error}',
   wizard_subnet_label: 'Subnetz',
   wizard_port_label: 'Port',
+  wizard_rename_button: 'Umbenennen',
+  wizard_rename_placeholder: 'Neuer Maschinenname',
   wizard_confirm_button: 'Bestätigen',
   wizard_confirm_empty_title: 'Alle Maschinen entfernen?',
   wizard_confirm_empty_message:

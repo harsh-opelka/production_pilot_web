@@ -22,6 +22,8 @@
           {translate($lang, 'nav_service')}
         </button>
       </li>
+    {/if}
+    {#if $auth.level === 'service' || $auth.level === 'management'}
       <li>
         <button class:active={$page === 'settings'} onclick={() => page.set('settings')}>
           {translate($lang, 'nav_settings')}

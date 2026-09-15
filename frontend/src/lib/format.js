@@ -2,8 +2,11 @@ import { translate } from './translations.js';
 
 // Single wordy duration formatter shared by every state timer (Baking's
 // countdown and the live elapsed timers for Cold/Heating/Waiting/Error) —
-// "X Min. Y Sek." under an hour, "X Std. Y Min." once it reaches an hour,
-// so long-running states don't degrade into an unbroken run of minutes.
+// "X Min Y Sek" under an hour, "X Std Y Min" once it reaches an hour, so
+// long-running states don't degrade into an unbroken run of minutes.
+// Abbreviations are deliberately period-free (translations.js/
+// translations_de.json's duration_ms_format/duration_hm_format) — not
+// "Min." / "Sek." / "Std." — per spec.
 export function formatDuration(seconds, language) {
   const total = Math.max(0, Math.floor(seconds ?? 0));
   if (total >= 3600) {

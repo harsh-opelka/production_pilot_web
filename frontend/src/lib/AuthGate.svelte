@@ -1,5 +1,5 @@
 <script>
-  import { auth, lang } from './stores.js';
+  import { lang } from './stores.js';
   import { translate } from './translations.js';
   import { login, ServiceApiError } from './serviceApi.js';
 
@@ -9,7 +9,10 @@
   let loading = $state(false);
   let passwordInput;
 
-  function openGate() {
+  // Exposed for TopBar.svelte to call via bind:this — the login trigger
+  // is now the clickable Opelka logo instead of a standalone hamburger
+  // button, but the modal itself (and everything below) is unchanged.
+  export function openGate() {
     open = true;
     error = '';
     password = '';
@@ -29,7 +32,8 @@
     try {
       await login(password);
       // Success — $auth.token becomes truthy, App.svelte renders the
-      // sidebar; this component reacts to that itself (see {#if} below).
+      // sidebar and TopBar.svelte's logo click handler stops firing
+      // openGate (see its own {#if !$auth.token} guard).
       password = '';
       open = false;
     } catch (err) {
@@ -46,18 +50,6 @@
     if (open) passwordInput?.focus();
   });
 </script>
-
-{#if !$auth.token}
-  <button
-    type="button"
-    class="menu-button"
-    onclick={openGate}
-    aria-label={translate($lang, 'menu_tooltip')}
-    title={translate($lang, 'menu_tooltip')}
-  >
-    ☰
-  </button>
-{/if}
 
 {#if open}
   <div class="overlay" onclick={closeGate} role="presentation">
@@ -80,32 +72,10 @@
 {/if}
 
 <style>
-  /* A normal flex item inside .left-group (see TopBar.svelte) — flex:0 0
-     auto, so it just takes its own small size at the start of the row
-     without disturbing the next-action/logo layout or its wrap
-     behavior at high --ui-scale. */
-  .menu-button {
-    flex: 0 0 auto;
-    width: 2.25rem;
-    height: 2.25rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 50%;
-    border: 1px solid var(--border-color);
-    background: var(--bg-panel);
-    color: var(--text-secondary);
-    font-size: 1.2rem;
-    line-height: 1;
-  }
-
-  .menu-button:hover {
-    color: var(--text-primary);
-  }
-
-  /* The overlay itself is position:fixed, so being nested in .left-group
-     (normal document flow) doesn't affect it — it still covers the full
-     viewport regardless of where in the DOM it's mounted. */
+  /* The overlay itself is position:fixed, so wherever TopBar.svelte
+     mounts this component (see bind:this there) doesn't affect it — it
+     still covers the full viewport regardless of where in the DOM it's
+     mounted. */
   .overlay {
     position: fixed;
     inset: 0;

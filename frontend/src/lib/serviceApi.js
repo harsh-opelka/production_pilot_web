@@ -1,5 +1,5 @@
 import { get } from 'svelte/store';
-import { auth } from './stores.js';
+import { auth, sidebarOpen } from './stores.js';
 
 export class ServiceApiError extends Error {
   constructor(message, status) {
@@ -13,7 +13,9 @@ export class ServiceApiError extends Error {
  * current token, and on a 401 clears the auth store — the session is
  * gone (expired or the server restarted), so the UI must drop back to
  * the unauthenticated Production view rather than keep pretending it's
- * still authorized (see App.svelte's $effect on $auth.token).
+ * still authorized (see App.svelte's $effect on $auth.token). Also
+ * closes the sidebar (see stores.js's sidebarOpen) — with no valid
+ * session left, there's nothing for it to keep showing.
  */
 async function serviceFetch(path, options = {}) {
   const { token } = get(auth);
@@ -32,6 +34,7 @@ async function serviceFetch(path, options = {}) {
 
   if (res.status === 401) {
     auth.set({ token: null, level: null });
+    sidebarOpen.set(false);
     throw new ServiceApiError(data?.detail ?? 'Not authenticated', 401);
   }
 
@@ -66,10 +69,15 @@ export async function login(password) {
   }
 
   auth.set({ token: data.token, level: data.level });
+  // Opens the sidebar on a fresh login — see TopBar.svelte's logo click
+  // handler, which never calls login() again while already authenticated,
+  // so this only ever fires once per session (not on every reopen).
+  sidebarOpen.set(true);
 }
 
 export function logout() {
   auth.set({ token: null, level: null });
+  sidebarOpen.set(false);
 }
 
 export function scanNetwork(subnet, port) {

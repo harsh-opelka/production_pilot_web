@@ -57,3 +57,15 @@ export const nowTick = readable(Date.now(), (set) => {
 // reloading is treated the same as logging out), since this gates
 // config changes and password resets on a shared-network app.
 export const auth = writable({ token: null, level: null });
+
+// Pure UI state — whether the sidebar is CURRENTLY SHOWN, independent of
+// whether the session is authenticated (see `auth` above). Deliberately
+// a separate store rather than deriving "show sidebar" straight from
+// `auth.token`: that used to make closing the sidebar indistinguishable
+// from logging out, so reopening it (via the logo) re-prompted for the
+// password even though the session was still valid. See serviceApi.js's
+// login()/logout() (and its 401 handler) for where this gets set, and
+// TopBar.svelte's logo click handler for the toggle-vs-prompt logic.
+// App.svelte only renders <Sidebar> while BOTH this AND auth.token are
+// true.
+export const sidebarOpen = writable(false);
