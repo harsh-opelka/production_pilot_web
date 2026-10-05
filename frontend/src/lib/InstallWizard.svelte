@@ -18,19 +18,22 @@
   let checkedIps = $state(/** @type {Set<string>} */ (new Set()));
 
   // --- Section 2: machines (pre-populated from existing config) -----
-  let groups = $state([]); // [{name, type, plcs: [ip,...]}]
+  // plcs are in priority order (index 0 = highest); unit_number is the
+  // technician-set machine number, independent of that order.
+  let groups = $state([]); // [{name, type, plcs: [{ip, unit_number}, ...]}]
   let loadingConfig = $state(true);
   let configLoadError = $state('');
 
-  let assignedIps = $derived(new Set(groups.flatMap((g) => g.plcs)));
+  let assignedIps = $derived(new Set(groups.flatMap((g) => g.plcs.map((p) => p.ip))));
   let availableDevices = $derived(scanResults.filter((d) => !assignedIps.has(d.ip)));
 
   // --- Create-group form ----------------------------------------------
   let showCreateForm = $state(false);
   let createName = $state('');
   let createType = $state('STANDALONE');
-  let createIps = $state(/** @type {string[]} */ ([]));
+  let createPlcs = $state(/** @type {{ip: string, unit_number: number | null}[]} */ ([]));
   let createNameError = $state('');
+  let createUnitError = $state('');
 
   // --- Save -------------------------------------------------------------
   let saving = $state(false);
@@ -41,7 +44,14 @@
   onMount(async () => {
     try {
       const config = await getServiceConfig();
-      groups = (config.machines ?? []).map((m) => ({ name: m.name, type: m.type, plcs: [...m.plcs] }));
+      // The server always returns {ip, unit_number} entries (an old
+      // plain-IP config is numbered by position there), so the stored
+      // machine numbers are kept as-is rather than re-derived from order.
+      groups = (config.machines ?? []).map((m) => ({
+        name: m.name,
+        type: m.type,
+        plcs: m.plcs.map((p) => ({ ip: p.ip, unit_number: p.unit_number })),
+      }));
     } catch (err) {
       configLoadError = err.message;
     } finally {
@@ -72,33 +82,61 @@
   }
 
   function openCreateForm() {
-    createIps = availableDevices.filter((d) => checkedIps.has(d.ip)).map((d) => d.ip);
-    createType = TYPE_BY_COUNT[createIps.length] ?? 'QUATTRO';
+    // Machine numbers pre-filled 1..n from the initial order, but editable.
+    createPlcs = availableDevices
+      .filter((d) => checkedIps.has(d.ip))
+      .map((d, i) => ({ ip: d.ip, unit_number: i + 1 }));
+    createType = TYPE_BY_COUNT[createPlcs.length] ?? 'QUATTRO';
     createName = '';
     createNameError = '';
+    createUnitError = '';
     showCreateForm = true;
   }
 
+  // Moving a row swaps whole {ip, unit_number} entries, so a PLC keeps its
+  // machine number — only its priority position changes.
   function moveUp(index) {
     if (index === 0) return;
-    const next = [...createIps];
+    const next = [...createPlcs];
     [next[index - 1], next[index]] = [next[index], next[index - 1]];
-    createIps = next;
+    createPlcs = next;
   }
 
   function moveDown(index) {
-    if (index === createIps.length - 1) return;
-    const next = [...createIps];
+    if (index === createPlcs.length - 1) return;
+    const next = [...createPlcs];
     [next[index], next[index + 1]] = [next[index + 1], next[index]];
-    createIps = next;
+    createPlcs = next;
+  }
+
+  // Same rule as the server (plc_config.unit_number_problem): positive
+  // whole number, unique within this group.
+  function unitNumberError(plcs) {
+    const seen = new Set();
+    for (const p of plcs) {
+      if (!Number.isInteger(p.unit_number) || p.unit_number < 1) {
+        return translate($lang, 'wizard_machine_no_invalid', { ip: p.ip });
+      }
+      if (seen.has(p.unit_number)) {
+        return translate($lang, 'wizard_machine_no_duplicate', { n: p.unit_number });
+      }
+      seen.add(p.unit_number);
+    }
+    return '';
   }
 
   function confirmCreateGroup() {
-    if (!createName.trim()) {
-      createNameError = translate($lang, 'wizard_name_required_msg');
-      return;
-    }
-    groups = [...groups, { name: createName.trim(), type: createType, plcs: [...createIps] }];
+    createNameError = createName.trim() ? '' : translate($lang, 'wizard_name_required_msg');
+    createUnitError = unitNumberError(createPlcs);
+    if (createNameError || createUnitError) return;
+    groups = [
+      ...groups,
+      {
+        name: createName.trim(),
+        type: createType,
+        plcs: createPlcs.map((p) => ({ ip: p.ip, unit_number: p.unit_number })),
+      },
+    ];
     checkedIps = new Set();
     showCreateForm = false;
   }
@@ -119,7 +157,7 @@
   // immediate-write path, for consistency with every other edit in this
   // panel. Since performSave always sends the whole `groups` array
   // (not a diff), the existing /api/service/config endpoint already
-  // persists a renamed group's plcs/type/priority order untouched —
+  // persists a renamed group's plcs/type/priority order/machine numbers untouched —
   // nothing needed there.
   let renamingIndex = $state(/** @type {number | null} */ (null));
   let renameValue = $state('');
@@ -257,7 +295,7 @@
         {#if showCreateForm}
           <div class="create-form">
             <h3>{translate($lang, 'wizard_create_title')}</h3>
-            <p class="hint">{translate($lang, 'wizard_plcs_selected', { n: createIps.length })}</p>
+            <p class="hint">{translate($lang, 'wizard_plcs_selected', { n: createPlcs.length })}</p>
 
             <label class="field">
               <span>{translate($lang, 'wizard_machine_name_label')}</span>
@@ -283,9 +321,16 @@
             <div class="priority-list">
               <p class="hint">{translate($lang, 'wizard_priority_order_label')}</p>
               <ol>
-                {#each createIps as ip, index (ip)}
+                {#each createPlcs as plc, index (plc.ip)}
                   <li>
-                    <span class="priority-ip">{ip}</span>
+                    <span class="priority-badge" title={translate($lang, 'wizard_priority_rank', { n: index + 1 })}>
+                      P{index + 1}
+                    </span>
+                    <span class="priority-ip">{plc.ip}</span>
+                    <label class="machine-no">
+                      <span>{translate($lang, 'wizard_machine_no_label')}</span>
+                      <input type="number" min="1" step="1" bind:value={plc.unit_number} />
+                    </label>
                     <span class="priority-buttons">
                       <button
                         type="button"
@@ -297,7 +342,7 @@
                       <button
                         type="button"
                         onclick={() => moveDown(index)}
-                        disabled={index === createIps.length - 1}
+                        disabled={index === createPlcs.length - 1}
                       >
                         {translate($lang, 'wizard_move_down_button')}
                       </button>
@@ -305,6 +350,9 @@
                   </li>
                 {/each}
               </ol>
+              {#if createUnitError}
+                <p class="error">{createUnitError}</p>
+              {/if}
             </div>
 
             <div class="form-actions">
@@ -374,8 +422,8 @@
                   <p class="error rename-error">{renameError}</p>
                 {/if}
                 <ol class="group-ips">
-                  {#each group.plcs as ip (ip)}
-                    <li>{ip}</li>
+                  {#each group.plcs as plc (plc.ip)}
+                    <li>{translate($lang, 'wizard_saved_plc', { n: plc.unit_number, ip: plc.ip })}</li>
                   {/each}
                 </ol>
               </div>
@@ -600,14 +648,12 @@
     list-style: none;
     margin: 0;
     padding: 0;
-    counter-reset: priority;
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
   }
 
   .priority-list li {
-    counter-increment: priority;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -618,17 +664,38 @@
     background: var(--bg-app);
   }
 
-  .priority-list li::before {
-    content: counter(priority) '.';
-    font-weight: 600;
+  /* Priority rank — deliberately styled as a badge, not a bare "1.", so it
+     can't be mistaken for the "Machine no." input next to it. */
+  .priority-badge {
+    flex-shrink: 0;
+    min-width: 2.4em;
+    text-align: center;
+    padding: 0.15rem 0.4rem;
+    border-radius: var(--radius);
+    background: var(--bg-panel);
+    border: 1px solid var(--border-color);
     color: var(--text-secondary);
-    margin-right: 0.5rem;
+    font-weight: 600;
+    font-size: calc(var(--font-toggle) * 0.85);
   }
 
   .priority-ip {
     font-family: ui-monospace, Consolas, monospace;
     color: var(--text-primary);
     flex: 1;
+  }
+
+  .machine-no {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: calc(var(--font-toggle) * 0.85);
+    color: var(--text-secondary);
+  }
+
+  .machine-no input {
+    width: 4.5rem;
+    padding: 0.3rem 0.45rem;
   }
 
   .priority-buttons {
@@ -732,7 +799,6 @@
 
   .group-ips {
     list-style: none;
-    counter-reset: gip;
     margin: 0;
     padding: 0;
     font-family: ui-monospace, Consolas, monospace;
@@ -741,14 +807,6 @@
     display: flex;
     flex-direction: column;
     gap: 0.2rem;
-  }
-
-  .group-ips li {
-    counter-increment: gip;
-  }
-
-  .group-ips li::before {
-    content: counter(gip) '. ';
   }
 
   .modal-footer {

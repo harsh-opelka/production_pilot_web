@@ -12,7 +12,8 @@ place that picks which source is active (see _poll_loop), so nothing
 here needs to be, or should be, source-aware.
 
 On init, mirrors the actual installed configuration (plc_config.json —
-same group names/types/IPs/unit ordering OpcUaSource would build) so
+same group names/types/IPs/priority order/machine numbers OpcUaSource
+would build) so
 demo data looks like the real site. Falls back to one default demo
 group when there's no config yet (e.g. before the Installation Wizard
 has run), so Demo Mode always has something to show.
@@ -20,13 +21,13 @@ has run), so Demo Mode always has something to show.
 
 from __future__ import annotations
 
-import json
 import threading
 import time
 from pathlib import Path
 
 from .models import MachineGroup, MachineState, PlcData
 from .opcua_source import CONFIG_PATH
+from .plc_config import load_config
 
 #: Fixed recipe choices offered by the Demo Controls panel (see
 #: server.py's DemoSetStateIn / /api/service/demo/set-state, which
@@ -43,14 +44,17 @@ _DEFAULT_UNIT_COUNT = 4
 _DEFAULT_IP_PREFIX = "192.0.2."
 
 
-def _default_plc(index: int, ip: str) -> PlcData:
+def _default_plc(index: int, ip: str, unit_number: int | None = None) -> PlcData:
+    """index = priority position; unit_number = the configured machine
+    number (see plc_config.py), defaulting to index + 1 for the built-in
+    demo group, which has no config to take it from."""
     return PlcData(
         ip=ip,
         name=f"PLC {index + 1}",
         state=MachineState.READY,
         is_online=True,
         default_priority=index,
-        unit_number=index + 1,
+        unit_number=unit_number if unit_number is not None else index + 1,
     )
 
 
@@ -84,12 +88,14 @@ class SimulatedSource:
         self._load_default()
 
     def _load_from_config(self, config_path: Path) -> None:
-        with open(config_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        data = load_config(config_path)
 
         groups: list[MachineGroup] = []
         for machine in data.get("machines", []):
-            plcs = [_default_plc(index, ip) for index, ip in enumerate(machine.get("plcs", []))]
+            plcs = [
+                _default_plc(index, entry["ip"], entry["unit_number"])
+                for index, entry in enumerate(machine["plcs"])
+            ]
             groups.append(MachineGroup(name=machine["name"], type=machine["type"], plcs=plcs))
         self._groups = groups
 

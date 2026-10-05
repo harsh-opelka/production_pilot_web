@@ -87,6 +87,7 @@ from datetime import datetime, timedelta, timezone
 
 from . import history
 from .opcua_source import CONFIG_PATH
+from .plc_config import load_config
 
 # The observed-time buckets. Everything in here is summed to form the
 # productivity denominator, so UNTRACKED_KEY is deliberately NOT a member
@@ -235,6 +236,7 @@ def compute_daily_summary(date: str, boundary_mode: str = "full_day") -> dict:
         return {"date": date, "machines": []}
 
     now = datetime.now(timezone.utc)
+    unit_numbers = _configured_unit_numbers()
 
     machines = []
     for plc_ip in set(by_plc) | set(carry_over):
@@ -285,7 +287,7 @@ def compute_daily_summary(date: str, boundary_mode: str = "full_day") -> dict:
             {
                 "group_name": last["group_name"],
                 "plc_ip": plc_ip,
-                "unit_number": last["unit_number"],
+                "unit_number": unit_numbers.get(plc_ip, last["unit_number"]),
                 **{key: round(value) for key, value in totals.items()},
                 _UNTRACKED_KEY: round(untracked),
                 "productivity_pct": productivity_pct,
@@ -313,6 +315,7 @@ def compute_timeline(date: str) -> dict:
     fabricated gap-free timeline."""
     day_start, day_end, is_today, by_plc, carry_over = _gather_daily_rows(date, boundary_mode="full_day")
     now = datetime.now(timezone.utc)
+    unit_numbers = _configured_unit_numbers()
 
     machines = []
     for plc_ip in set(by_plc) | set(carry_over):
@@ -336,7 +339,7 @@ def compute_timeline(date: str) -> dict:
             {
                 "group_name": last["group_name"],
                 "plc_ip": plc_ip,
-                "unit_number": last["unit_number"],
+                "unit_number": unit_numbers.get(plc_ip, last["unit_number"]),
                 "spans": spans,
             }
         )
@@ -488,23 +491,30 @@ def load_configured_plcs() -> list[dict]:
     OpcUaSource (constructing/using that opens real OPC UA connections,
     which would make a stats-page request — or server startup, see
     server.py _marker_plcs — block on unreachable PLCs).
-    Mirrors OpcUaSource._load_config's unit_number convention (1-based
-    index within each machine's plcs array) so labels line up with the
-    live dashboard. Returns [] if unconfigured or the file is missing/
+    unit_number is the configured machine number (see plc_config.py),
+    same value OpcUaSource uses, so labels line up with the live
+    dashboard. Returns [] if unconfigured or the file is missing/
     corrupt — a fresh install just shows an empty table, not an error."""
     if not CONFIG_PATH.exists():
         return []
     try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, OSError):
+        data = load_config(CONFIG_PATH)
+    except (json.JSONDecodeError, OSError, KeyError, ValueError):
         return []
 
     plcs = []
     for machine in data.get("machines", []):
-        for index, ip in enumerate(machine.get("plcs", [])):
-            plcs.append({"group_name": machine["name"], "plc_ip": ip, "unit_number": index + 1})
+        for entry in machine["plcs"]:
+            plcs.append({"group_name": machine["name"], "plc_ip": entry["ip"], "unit_number": entry["unit_number"]})
     return plcs
+
+
+def _configured_unit_numbers() -> dict[str, int]:
+    """plc_ip -> machine number from the CURRENT config. History rows keep
+    whatever unit_number was stored when they were written (never
+    rewritten), so anything displayed looks the number up here by IP and
+    only falls back to the row's own value for an IP no longer configured."""
+    return {plc["plc_ip"]: plc["unit_number"] for plc in load_configured_plcs()}
 
 
 def with_all_configured_machines(summary: dict) -> dict:
@@ -516,7 +526,7 @@ def with_all_configured_machines(summary: dict) -> dict:
     appearing. group_name/unit_number are taken from the current config
     for every row (not from historical transition data), so a
     zero-default row and a real-data row for the same PLC never disagree
-    about its current name/position.
+    about its current name/machine number.
 
     Deliberately NOT folded into compute_daily_summary itself:
     compute_range_summary (and the Trend charts) rely on a day's

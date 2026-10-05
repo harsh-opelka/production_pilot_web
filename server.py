@@ -27,13 +27,14 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from production_pilot import exports, history, scan_plcs, service_config, stats
+from production_pilot import exports, history, plc_config, scan_plcs, service_config, stats
 from production_pilot.demo_source import RECIPE_OPTIONS, SimulatedSource
 from production_pilot.models import MachineGroup, MachineState
 from production_pilot.opcua_source import CONFIG_PATH, OpcUaSource
@@ -478,10 +479,20 @@ class ScanRequest(BaseModel):
     port: int = scan_plcs.DEFAULT_PORT
 
 
+class PlcIn(BaseModel):
+    ip: str
+    # Any, not int: a missing/non-numeric/bool machine number must reach
+    # _validate_config's clear error message rather than pydantic's
+    # generic 422 (or get silently coerced, e.g. "3" -> 3, True -> 1).
+    unit_number: Any = None
+
+
 class MachineIn(BaseModel):
     name: str
     type: str
-    plcs: list[str]
+    # Plain IP strings (the old format) are still accepted and numbered
+    # by position — see plc_config.normalize_plcs.
+    plcs: list[PlcIn | str]
 
 
 class ConfigIn(BaseModel):
@@ -668,28 +679,38 @@ async def service_scan(body: ScanRequest, _token: str = Depends(require_level("s
 
 @app.get("/api/service/config")
 def service_get_config(_token: str = Depends(require_level("service"))) -> dict:
+    # Always returned in the new {"ip", "unit_number"} format (an old
+    # plain-IP config is numbered by position — see plc_config.py), so the
+    # wizard edits the stored machine numbers rather than re-deriving them.
     if not CONFIG_PATH.exists():
         return {"machines": []}
     try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
+        return plc_config.read_config(CONFIG_PATH)
+    except (json.JSONDecodeError, OSError, KeyError, TypeError):
         return {"machines": []}
 
 
 _VALID_MACHINE_TYPES = {"STANDALONE", "DUO", "TRIO", "QUATTRO"}
 
 
-def _validate_config(config: ConfigIn) -> None:
+def _normalized_machines(config: ConfigIn) -> list[dict]:
+    return [
+        {**m.model_dump(exclude={"plcs"}), "plcs": plc_config.normalize_plcs(m.model_dump()["plcs"])}
+        for m in config.machines
+    ]
+
+
+def _validate_config(machines: list[dict]) -> None:
     seen_ips: set[str] = set()
-    for machine in config.machines:
-        if not machine.name.strip():
+    for machine in machines:
+        if not machine["name"].strip():
             raise HTTPException(status_code=400, detail="Machine name must not be empty")
-        if machine.type not in _VALID_MACHINE_TYPES:
-            raise HTTPException(status_code=400, detail=f"Invalid machine type: {machine.type}")
-        if not machine.plcs:
-            raise HTTPException(status_code=400, detail=f"Machine '{machine.name}' has no PLCs")
-        for ip in machine.plcs:
+        if machine["type"] not in _VALID_MACHINE_TYPES:
+            raise HTTPException(status_code=400, detail=f"Invalid machine type: {machine['type']}")
+        if not machine["plcs"]:
+            raise HTTPException(status_code=400, detail=f"Machine '{machine['name']}' has no PLCs")
+        for plc in machine["plcs"]:
+            ip = plc["ip"]
             try:
                 ipaddress.ip_address(ip)
             except ValueError:
@@ -697,12 +718,17 @@ def _validate_config(config: ConfigIn) -> None:
             if ip in seen_ips:
                 raise HTTPException(status_code=400, detail=f"IP {ip} is assigned to more than one machine")
             seen_ips.add(ip)
+        # Unique within this group only — two groups may both have a No. 1.
+        problem = plc_config.unit_number_problem(machine["name"], machine["plcs"])
+        if problem:
+            raise HTTPException(status_code=400, detail=problem)
 
 
 @app.post("/api/service/config")
 def service_save_config(body: ConfigIn, _token: str = Depends(require_level("service"))) -> dict:
-    _validate_config(body)
-    data = {"machines": [m.model_dump() for m in body.machines]}
+    machines = _normalized_machines(body)
+    _validate_config(machines)
+    data = {"machines": machines}
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)

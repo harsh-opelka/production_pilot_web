@@ -18,7 +18,6 @@ Node IDs (confirmed identical on every connected PLC, Tim):
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -29,6 +28,7 @@ except ImportError:
     sys.exit(1)
 
 from .models import MachineGroup, MachineState, OPCUA_STATE_MAP, PlcData
+from .plc_config import load_config
 
 CONFIG_PATH = Path(__file__).resolve().parent / "plc_config.json"
 
@@ -112,8 +112,8 @@ class _PlcConnection:
 class OpcUaSource:
     """
     Drop-in replacement for SimulatedSource, backed by real PLCs.
-    Built from plc_config.json (see wizard/install_wizard.py for the
-    format) — one MachineGroup per configured machine, one _PlcConnection
+    Built from plc_config.json (see plc_config.py for the format) — one
+    MachineGroup per configured machine, one _PlcConnection
     per PLC IP.
     """
 
@@ -124,28 +124,29 @@ class OpcUaSource:
         self._load_config(Path(config_path))
 
     def _load_config(self, config_path: Path) -> None:
-        with open(config_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        data = load_config(config_path)
 
         default_port = data.get("port", DEFAULT_PORT)
 
         for machine in data.get("machines", []):
             port = machine.get("port", default_port)
             plcs: list[PlcData] = []
-            for index, ip in enumerate(machine.get("plcs", [])):
+            for index, entry in enumerate(machine["plcs"]):
+                ip = entry["ip"]
                 # Order in the config's "plcs" array = saved default
-                # priority, index 0 = highest (see install_wizard.py).
-                # unit_number drives the on-screen "Fryer N" label, built
-                # at render time (utils.format_unit_name) so it stays
-                # translatable — name here is just an internal identity
-                # label, never shown.
+                # priority, index 0 = highest. unit_number is the
+                # technician-set machine number (see plc_config.py) —
+                # independent of that order — and drives the on-screen
+                # label, built at render time (utils.format_unit_name) so
+                # it stays translatable. name here is just an internal
+                # identity label, never shown.
                 plcs.append(PlcData(
                     ip=ip,
                     name=f"PLC {index + 1}",
                     state=MachineState.COLD,
                     is_online=False,
                     default_priority=index,
-                    unit_number=index + 1,
+                    unit_number=entry["unit_number"],
                 ))
                 self._connections[ip] = _PlcConnection(ip, port)
                 self._online[ip] = False
