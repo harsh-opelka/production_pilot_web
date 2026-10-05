@@ -18,13 +18,17 @@ function buildMessage(key, plc, language) {
 }
 
 /**
- * Mirrors V1: take each group's first (highest-priority, already sorted
- * by the backend) fryer as that group's candidate, then pick the most
- * urgent candidate by tier (Error > near-done Baking > Ready). If no
- * candidate qualifies (all candidates are Heating/Cold/Offline/normal
- * Baking), fall back to the first READY fryer anywhere — it may not be
- * its own group's first slot, e.g. a normal-baking machine with time to
- * spare can outrank a READY sibling within the same group.
+ * Walks every group's plcs in the order the backend sent them (already
+ * sorted by priority.calculate_priority: Error, then Ready/Baking/Almost
+ * finished by saved priority, then Heating, then Cold/Offline) and picks
+ * the first machine that is actionable NOW, in this precedence:
+ *   1. the first Error machine;
+ *   2. otherwise the first Ready machine — any Baking / Almost-finished
+ *      machine ranked above it is skipped, it has nothing to do yet;
+ *   3. only if nothing is in Error or Ready, the first Almost-finished
+ *      machine ("Unload soon").
+ * So an Almost-finished tile keeps its yellow styling but never takes the
+ * banner (or the NEXT badge) while any Ready machine exists.
  *
  * Returns { text, tier, ip } — tier identifies which precedence rule
  * produced the message ('error' | 'near-completion' | 'ready' | 'none'),
@@ -38,30 +42,25 @@ function buildMessage(key, plc, language) {
  * (see FryerTile.svelte's isNext prop) without re-deriving priority.
  */
 export function computeNextAction(groups, language) {
-  const candidates = groups.filter((g) => g.plcs.length > 0).map((g) => ({ group: g, plc: g.plcs[0] }));
+  const plcs = groups.flatMap((g) => g.plcs);
 
-  const errorHit = candidates.find((c) => isError(c.plc));
-  if (errorHit) {
-    return { text: buildMessage('next_action_error', errorHit.plc, language), tier: 'error', ip: errorHit.plc.ip };
+  const errorPlc = plcs.find(isError);
+  if (errorPlc) {
+    return { text: buildMessage('next_action_error', errorPlc, language), tier: 'error', ip: errorPlc.ip };
   }
 
-  const bakingHit = candidates.find((c) => isNearDoneBaking(c.plc));
-  if (bakingHit) {
+  const readyPlc = plcs.find(isReady);
+  if (readyPlc) {
+    return { text: buildMessage('next_action_load', readyPlc, language), tier: 'ready', ip: readyPlc.ip };
+  }
+
+  const nearDonePlc = plcs.find(isNearDoneBaking);
+  if (nearDonePlc) {
     return {
-      text: buildMessage('next_action_near_completion', bakingHit.plc, language),
+      text: buildMessage('next_action_near_completion', nearDonePlc, language),
       tier: 'near-completion',
-      ip: bakingHit.plc.ip,
+      ip: nearDonePlc.ip,
     };
-  }
-
-  const readyHit = candidates.find((c) => isReady(c.plc));
-  if (readyHit) {
-    return { text: buildMessage('next_action_load', readyHit.plc, language), tier: 'ready', ip: readyHit.plc.ip };
-  }
-
-  for (const group of groups) {
-    const readyPlc = group.plcs.find(isReady);
-    if (readyPlc) return { text: buildMessage('next_action_load', readyPlc, language), tier: 'ready', ip: readyPlc.ip };
   }
 
   return { text: translate(language, 'no_action'), tier: 'none', ip: null };

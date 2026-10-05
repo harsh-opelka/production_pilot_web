@@ -145,8 +145,8 @@ def main() -> bool:
 
     results.append(_check("calculate_priority: same order with or without custom numbers",
                           priority_order(new_path), priority_order(old_path)))
-    results.append(_check("calculate_priority: ERROR, near-done BAKING, READY, HEATING",
-                          priority_order(new_path), [IP_C, IP_B, IP_A, IP_D]))
+    results.append(_check("calculate_priority: ERROR, then READY/near-done BAKING by saved order, then HEATING",
+                          priority_order(new_path), [IP_C, IP_A, IP_B, IP_D]))
 
     all_passed = all(results)
     print()

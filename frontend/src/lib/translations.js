@@ -21,10 +21,10 @@ const en = {
   next_action_prefix: 'Next Action',
   next_action_error: '{unit}: Check Error',
   // A Ready machine is empty and needs loading now; an Almost Finished
-  // (near-completion BAKING) one will need loading again soon once
-  // unloaded — see nextAction.js's isNearDoneBaking/near_completion.
+  // (near-completion BAKING) one is about to finish and needs UNLOADING
+  // soon — only shown when nothing is in Error or Ready (see nextAction.js).
   next_action_load: '{unit}: Load',
-  next_action_near_completion: '{unit}: Load Soon',
+  next_action_near_completion: '{unit}: Unload Soon',
   no_action: '–',
   // Small corner badge on the one MachineTile matching the Next Action
   // banner (see FryerTile.svelte's isNext prop).
@@ -243,7 +243,7 @@ const de = {
   next_action_prefix: 'Nächste Aktion',
   next_action_error: '{unit}: Störung prüfen',
   next_action_load: '{unit}: Beladen',
-  next_action_near_completion: '{unit}: Bald beladen',
+  next_action_near_completion: '{unit}: Bald entladen',
   tile_next_badge: 'Nächste',
   // Overrides de_v1's "Bereit" — same reasoning as the en export above.
   state_ready: 'Warte',
