@@ -69,3 +69,9 @@ export const auth = writable({ token: null, level: null });
 // App.svelte only renders <Sidebar> while BOTH this AND auth.token are
 // true.
 export const sidebarOpen = writable(false);
+
+// Statistics table column picker — the column keys the user has HIDDEN
+// (not the visible ones), so a column added in a later version shows up
+// by default instead of silently staying hidden. Per-device display
+// preference, like theme/lang above.
+export const statsHiddenColumns = persisted('pp_stats_hidden_columns', []);

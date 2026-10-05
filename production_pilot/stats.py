@@ -20,14 +20,24 @@ Duration-walk rules (see compute_daily_summary):
     This is what lets a PLC that, say, has been READY since three days
     ago and never transitioned again show the full day as ready_seconds
     instead of zero.
-  - TODAY ONLY, that "00:00:00 local" start boundary itself slides
-    forward to this process's own startup instant whenever that's later
-    than local midnight (see history.get_server_started_at) — every
-    restart makes today's totals start accumulating fresh from the
-    moment the server came back up, rather than from midnight or from
-    whatever had already accumulated pre-restart. Any date strictly
-    before today is a closed historical day and always keeps the plain
-    midnight-to-midnight boundary, completely unaffected by restarts.
+  - compute_daily_summary takes a `boundary_mode` of "since_restart" or
+    "full_day":
+      - "since_restart": TODAY ONLY, the "00:00:00 local" start boundary
+        itself slides forward to this process's own startup instant
+        whenever that's later than local midnight (see
+        history.get_server_started_at) — every restart makes today's
+        totals start accumulating fresh from the moment the server came
+        back up, rather than from midnight or from whatever had already
+        accumulated pre-restart. This is what the shop-floor top-bar KPI
+        (compute_today_totals) uses, so it resets on every restart.
+      - "full_day": the boundary always stays at plain local midnight,
+        even for today — a restart never resets these totals. This is
+        what the Statistics page (compute_daily_summary's other callers)
+        uses, so a manager's daily report is trustworthy across routine
+        reboots.
+    Any date strictly before today always keeps the plain
+    midnight-to-midnight boundary regardless of boundary_mode — a closed
+    historical day is never touched by either mode.
   - A segment's duration runs from its own start to the NEXT segment's
     start, for the same PLC.
   - was_online == 0 always counts as offline_seconds, regardless of
@@ -72,8 +82,6 @@ Duration-walk rules (see compute_daily_summary):
 
 from __future__ import annotations
 
-import csv
-import io
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -97,19 +105,6 @@ _SECONDS_KEYS = (
 #: mixed into them.
 _UNTRACKED_KEY = "untracked_seconds"
 
-_CSV_HEADERS = [
-    "Machine Group",
-    "Unit",
-    "Baking (min)",
-    "Ready (min)",
-    "Heating (min)",
-    "Error (min)",
-    "Cold (min)",
-    "Offline (min)",
-    "Untracked (min)",
-    "Productivity (%)",
-]
-
 
 def today_local() -> str:
     return datetime.now().strftime("%Y-%m-%d")
@@ -128,19 +123,29 @@ def _day_start(date: str) -> datetime:
     return history.local_day_start_utc(date)
 
 
-def compute_daily_summary(date: str) -> dict:
+def _gather_daily_rows(date: str, boundary_mode: str) -> tuple[datetime, datetime, bool, dict[str, list[dict]], dict[str, dict]]:
+    """Shared setup for compute_daily_summary and compute_timeline: resolves
+    the day's start boundary (per boundary_mode — see module docstring),
+    fetches this day's rows trimmed to it, and the carry-over anchor per
+    PLC. Returns (day_start, day_end, is_today, by_plc, carry_over)."""
+    if boundary_mode not in ("since_restart", "full_day"):
+        raise ValueError(f"invalid boundary_mode: {boundary_mode!r}")
+
     is_today = date == today_local()
     day_start = _day_start(date)
     day_end = day_start + timedelta(days=1)  # this day's own midnight-to-midnight cap
 
-    # TODAY ONLY: the day's own effective start slides forward to this
-    # process's own startup instant, if that's later than local midnight —
-    # every restart makes "today" start accumulating fresh from that
-    # moment instead of from 00:00:00 (see history.get_server_started_at's
-    # docstring). Any date strictly before today always keeps the plain
-    # midnight boundary computed above — a closed historical day is never
-    # touched by this, regardless of when the server happens to restart.
-    if is_today:
+    # TODAY ONLY, and only in "since_restart" mode: the day's own effective
+    # start slides forward to this process's own startup instant, if
+    # that's later than local midnight — every restart makes "today" start
+    # accumulating fresh from that moment instead of from 00:00:00 (see
+    # history.get_server_started_at's docstring). "full_day" mode never
+    # applies this, even for today — that's what keeps the Statistics
+    # page's daily report intact across a routine restart. Any date
+    # strictly before today always keeps the plain midnight boundary
+    # computed above — a closed historical day is never touched by this,
+    # regardless of boundary_mode or of when the server happens to restart.
+    if is_today and boundary_mode == "since_restart":
         started_at = history.get_server_started_at()
         if started_at is not None:
             day_start = max(day_start, _parse(started_at))
@@ -164,6 +169,68 @@ def compute_daily_summary(date: str) -> dict:
     for row in rows:
         by_plc.setdefault(row["plc_ip"], []).append(row)
 
+    return day_start, day_end, is_today, by_plc, carry_over
+
+
+def _plc_segments(plc_ip: str, by_plc: dict[str, list[dict]], carry_over: dict[str, dict], day_start: datetime) -> list[dict]:
+    """The carry-over anchor (if any) plus this PLC's real rows for the
+    day, each with a resolved 'start' datetime — the raw segment list both
+    compute_daily_summary and compute_timeline walk (see module
+    docstring's duration-walk rules)."""
+    plc_rows = by_plc.get(plc_ip, [])
+    anchor = carry_over.get(plc_ip)
+    segments = []
+    if anchor is not None:
+        segments.append({**anchor, "start": day_start})
+    segments.extend({**row, "start": _parse(row["timestamp"])} for row in plc_rows)
+    return segments
+
+
+def _resolve_span_end(
+    segments: list[dict], i: int, day_end: datetime, is_today: bool, now: datetime
+) -> tuple[datetime, bool]:
+    """Resolves segment i's end instant, and whether it's poisoned by a
+    following UNKNOWN marker — see module docstring's duration-walk rules
+    for both. Shared by compute_daily_summary (duration totals) and
+    compute_timeline (span boundaries)."""
+    if i + 1 < len(segments):
+        end = segments[i + 1]["start"]
+        # UNKNOWN means "we don't know what happened before this
+        # instant this session" — see history.py's docstring. The
+        # matching SERVER_STOPPED row (written on a graceful
+        # shutdown) is what would normally close off the segment
+        # right before it at a KNOWN clean boundary; without one,
+        # nothing pins down when within this segment the server
+        # actually stopped observing. SERVER_STOPPED is only
+        # best-effort (never fires on a hard kill / crash / power
+        # loss — see server.py's _write_server_marker), so a
+        # segment can end at UNKNOWN with no SERVER_STOPPED ever
+        # having been written for it at all. Trusting seg's own
+        # new_state in that case would silently hand the entire
+        # unobserved gap to whatever state was active when the
+        # process died — exactly the inflated-Waiting-time bug
+        # this fixes. Only UNKNOWN retroactively poisons its
+        # predecessor this way; SERVER_STOPPED itself is always
+        # already caught by the UNTRACKED_STATES check below, so
+        # a segment that ends there (a clean shutdown) keeps its
+        # real, fully-trusted duration.
+        poisoned_by_unknown = segments[i + 1]["new_state"] == history.UNKNOWN_MARKER
+    elif is_today:
+        end = now
+        poisoned_by_unknown = False
+    else:
+        end = day_end
+        poisoned_by_unknown = False
+    return end, poisoned_by_unknown
+
+
+def compute_daily_summary(date: str, boundary_mode: str = "full_day") -> dict:
+    """boundary_mode is "since_restart" (top-bar KPI — see
+    compute_today_totals) or "full_day" (Statistics page — see this
+    module's docstring). Only affects TODAY's start boundary; any other
+    date always uses the plain midnight boundary regardless."""
+    day_start, day_end, is_today, by_plc, carry_over = _gather_daily_rows(date, boundary_mode)
+
     if not by_plc and not carry_over:
         return {"date": date, "machines": []}
 
@@ -172,47 +239,13 @@ def compute_daily_summary(date: str) -> dict:
     machines = []
     for plc_ip in set(by_plc) | set(carry_over):
         plc_rows = by_plc.get(plc_ip, [])
-        anchor = carry_over.get(plc_ip)
+        segments = _plc_segments(plc_ip, by_plc, carry_over, day_start)
         totals = {key: 0.0 for key in _SECONDS_KEYS}
         untracked = 0.0
 
-        segments = []
-        if anchor is not None:
-            segments.append({**anchor, "start": day_start})
-        segments.extend({**row, "start": _parse(row["timestamp"])} for row in plc_rows)
-
         for i, seg in enumerate(segments):
             start = seg["start"]
-
-            if i + 1 < len(segments):
-                end = segments[i + 1]["start"]
-                # UNKNOWN means "we don't know what happened before this
-                # instant this session" — see history.py's docstring. The
-                # matching SERVER_STOPPED row (written on a graceful
-                # shutdown) is what would normally close off the segment
-                # right before it at a KNOWN clean boundary; without one,
-                # nothing pins down when within this segment the server
-                # actually stopped observing. SERVER_STOPPED is only
-                # best-effort (never fires on a hard kill / crash / power
-                # loss — see server.py's _write_server_marker), so a
-                # segment can end at UNKNOWN with no SERVER_STOPPED ever
-                # having been written for it at all. Trusting seg's own
-                # new_state in that case would silently hand the entire
-                # unobserved gap to whatever state was active when the
-                # process died — exactly the inflated-Waiting-time bug
-                # this fixes. Only UNKNOWN retroactively poisons its
-                # predecessor this way; SERVER_STOPPED itself is always
-                # already caught by the UNTRACKED_STATES check below, so
-                # a segment that ends there (a clean shutdown) keeps its
-                # real, fully-trusted duration.
-                poisoned_by_unknown = segments[i + 1]["new_state"] == history.UNKNOWN_MARKER
-            elif is_today:
-                end = now
-                poisoned_by_unknown = False
-            else:
-                end = day_end
-                poisoned_by_unknown = False
-
+            end, poisoned_by_unknown = _resolve_span_end(segments, i, day_end, is_today, now)
             duration = max(0.0, (end - start).total_seconds())
 
             # Checked BEFORE was_online: a marker row carries
@@ -238,6 +271,15 @@ def compute_daily_summary(date: str) -> dict:
         total_tracked = sum(totals.values())
         productivity_pct = round((totals["baking_seconds"] / total_tracked) * 100, 1) if total_tracked > 0 else 0.0
 
+        # Counts genuine transitions INTO ERROR within the period — i.e.
+        # real rows only (plc_rows, already trimmed to day_start), not the
+        # synthetic carry-over anchor (that transition happened before the
+        # period started, so counting it here would attribute an error
+        # that occurred on some earlier day to this one). UNKNOWN/
+        # SERVER_STOPPED markers never have new_state == "ERROR" so they're
+        # excluded automatically, matching the task's requirement.
+        error_count = sum(1 for row in plc_rows if row["new_state"] == "ERROR")
+
         last = segments[-1]  # current identity as of the latest data that day
         machines.append(
             {
@@ -247,6 +289,55 @@ def compute_daily_summary(date: str) -> dict:
                 **{key: round(value) for key, value in totals.items()},
                 _UNTRACKED_KEY: round(untracked),
                 "productivity_pct": productivity_pct,
+                "error_count": error_count,
+            }
+        )
+
+    machines.sort(key=lambda m: (m["group_name"], m["unit_number"]))
+    return {"date": date, "machines": machines}
+
+
+def compute_timeline(date: str) -> dict:
+    """Per-PLC ordered state spans across `date` (00:00-24:00 local, or
+    00:00-now for today) — for the Statistics page's Timeline view. Same
+    day-boundary/carry-forward/UNKNOWN-poisoning rules as
+    compute_daily_summary (see module docstring), but returns the spans
+    themselves rather than aggregated durations. Always boundary_mode=
+    "full_day" — like the rest of the Statistics page, a routine restart
+    must not truncate today's timeline.
+
+    Untracked spans (UNTRACKED_STATES, or a real span poisoned by a
+    following UNKNOWN — see module docstring) are represented explicitly
+    as state "NO_DATA" rather than omitted, so a manager can see exactly
+    when this server wasn't observing the machines instead of a
+    fabricated gap-free timeline."""
+    day_start, day_end, is_today, by_plc, carry_over = _gather_daily_rows(date, boundary_mode="full_day")
+    now = datetime.now(timezone.utc)
+
+    machines = []
+    for plc_ip in set(by_plc) | set(carry_over):
+        segments = _plc_segments(plc_ip, by_plc, carry_over, day_start)
+        spans = []
+        for i, seg in enumerate(segments):
+            start = seg["start"]
+            end, poisoned_by_unknown = _resolve_span_end(segments, i, day_end, is_today, now)
+            is_untracked = seg["new_state"] in history.UNTRACKED_STATES or poisoned_by_unknown
+            spans.append(
+                {
+                    "state": "NO_DATA" if is_untracked else seg["new_state"],
+                    "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "end": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "is_online": False if is_untracked else bool(seg["was_online"]),
+                }
+            )
+
+        last = segments[-1]
+        machines.append(
+            {
+                "group_name": last["group_name"],
+                "plc_ip": plc_ip,
+                "unit_number": last["unit_number"],
+                "spans": spans,
             }
         )
 
@@ -262,9 +353,14 @@ def compute_today_totals() -> dict:
 
     has_data mirrors compute_daily_summary's own "no rows at all" signal
     (recording off, or nothing logged yet today) rather than re-deriving it,
-    so the frontend can show a placeholder instead of a false "0h 0m"."""
+    so the frontend can show a placeholder instead of a false "0h 0m".
+
+    Uses boundary_mode="since_restart" — this is the shop-floor top-bar
+    KPI, which is deliberately meant to reset on every server restart
+    (unlike the Statistics page's "full_day" totals — see this module's
+    docstring)."""
     date = today_local()
-    summary = compute_daily_summary(date)
+    summary = compute_daily_summary(date, boundary_mode="since_restart")
     machines = summary["machines"]
     if not machines:
         return {
@@ -297,7 +393,94 @@ def compute_today_totals() -> dict:
     }
 
 
-_ZERO_TOTALS = {**{key: 0 for key in _SECONDS_KEYS}, _UNTRACKED_KEY: 0}
+_TOTALS_FIELDS = ("baking_seconds", "ready_seconds", "error_seconds", "cold_seconds", "offline_seconds")
+
+
+def compute_totals(machines: list[dict]) -> dict:
+    """Aggregates a compute_daily_summary()-shaped machines list (after
+    with_all_configured_machines, typically) into one across-all-machines
+    totals object — the shape /api/stats/daily-summary's top-level
+    "totals" field uses, and what "comparison.averages" is averaged
+    from (see compute_seven_day_average). productivity_pct is the weighted total (baking
+    over all machines' tracked time), matching compute_today_totals — NOT
+    an average of the per-machine percentages, which would misweight a
+    lightly-observed machine the same as a heavily-observed one."""
+    if not machines:
+        return {**{key: 0 for key in _TOTALS_FIELDS}, "error_count": 0, "productivity_pct": 0.0}
+
+    totals = {key: sum(m[key] for m in machines) for key in _TOTALS_FIELDS}
+    error_count = sum(m["error_count"] for m in machines)
+    # _SECONDS_KEYS (not _TOTALS_FIELDS) is the full observed-time set —
+    # includes heating_seconds, which _TOTALS_FIELDS deliberately omits
+    # from the reported totals shape but which still counts as tracked
+    # time for the denominator, exactly as in compute_today_totals.
+    total_tracked = sum(sum(m[key] for key in _SECONDS_KEYS) for m in machines)
+    productivity_pct = round((totals["baking_seconds"] / total_tracked) * 100, 1) if total_tracked > 0 else 0.0
+
+    return {**totals, "error_count": error_count, "productivity_pct": productivity_pct}
+
+
+#: How many days BEFORE the selected date form the KPI cards' baseline
+#: (see compute_seven_day_average).
+AVERAGE_WINDOW_DAYS = 7
+
+_DELTA_FIELDS = ("baking_seconds", "error_seconds", "error_count", "productivity_pct")
+
+
+def compute_seven_day_average(date: str, current_totals: dict) -> dict | None:
+    """The "vs 7-day average" baseline for /api/stats/daily-summary's
+    "comparison" field: across-all-machines totals averaged over the
+    AVERAGE_WINDOW_DAYS days immediately BEFORE `date` (date-7 .. date-1;
+    `date` itself is excluded so today never pulls its own baseline
+    toward itself), plus current-minus-average deltas. `current_totals`
+    is the caller's already-computed compute_totals() for `date`.
+
+    Window days are closed past days, so each uses boundary_mode=
+    "full_day" (plain midnight-to-midnight) — the selected date's own
+    totals keep whatever boundary the caller used.
+
+    Only days with recorded data count toward the average — checked
+    against the RAW compute_daily_summary result (genuinely empty
+    machines list), not the configured-machines-left-joined one. A day
+    the recorder was off is "unknown", not "zero"; averaging it in as
+    zero would make every normal day look like an improvement. Returns
+    None (not a zeroed-out dict) when NO day in the window has data, so
+    the frontend shows "no comparison data" instead of a misleading delta.
+
+    The Productivity card is compared against the configured target on
+    the frontend instead (see KpiRow.svelte); the averaged
+    productivity_pct (mean of the daily weighted percentages) is still
+    returned here for completeness."""
+    selected = datetime.strptime(date, "%Y-%m-%d").date()
+    window_start = selected - timedelta(days=AVERAGE_WINDOW_DAYS)
+    window_end = selected - timedelta(days=1)
+
+    day_totals = []
+    current = window_start
+    while current <= window_end:
+        raw = compute_daily_summary(current.strftime("%Y-%m-%d"), boundary_mode="full_day")
+        if raw["machines"]:
+            day_totals.append(compute_totals(with_all_configured_machines(raw)["machines"]))
+        current += timedelta(days=1)
+
+    if not day_totals:
+        return None
+
+    n = len(day_totals)
+    averages = {key: round(sum(t[key] for t in day_totals) / n, 1) for key in _DELTA_FIELDS}
+    deltas = {key: round(current_totals[key] - averages[key], 1) for key in _DELTA_FIELDS}
+
+    return {
+        "basis": "avg_7d",
+        "window_start": window_start.strftime("%Y-%m-%d"),
+        "window_end": window_end.strftime("%Y-%m-%d"),
+        "days_with_data": n,
+        "averages": averages,
+        "deltas": deltas,
+    }
+
+
+_ZERO_TOTALS = {**{key: 0 for key in _SECONDS_KEYS}, _UNTRACKED_KEY: 0, "error_count": 0}
 
 
 def load_configured_plcs() -> list[dict]:
@@ -369,36 +552,19 @@ def compute_range_summary(start: str, end: str) -> dict:
     — the exact same per-day computation as the single-date endpoint, not
     a separate implementation. Callers (server.py) are responsible for
     validating start <= end and the 90-day range cap before calling this;
-    it just walks whatever range it's given."""
+    it just walks whatever range it's given.
+
+    Always uses boundary_mode="full_day" (the Trend charts this feeds are
+    Statistics-page reporting, same as the single-date endpoint — see this
+    module's docstring)."""
     start_date = datetime.strptime(start, "%Y-%m-%d").date()
     end_date = datetime.strptime(end, "%Y-%m-%d").date()
 
     days = []
     current = start_date
     while current <= end_date:
-        days.append(compute_daily_summary(current.strftime("%Y-%m-%d")))
+        days.append(compute_daily_summary(current.strftime("%Y-%m-%d"), boundary_mode="full_day"))
         current += timedelta(days=1)
 
     return {"start": start, "end": end, "days": days}
 
-
-def to_csv(summary: dict) -> str:
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow(_CSV_HEADERS)
-    for m in summary["machines"]:
-        writer.writerow(
-            [
-                m["group_name"],
-                m["unit_number"],
-                round(m["baking_seconds"] / 60, 1),
-                round(m["ready_seconds"] / 60, 1),
-                round(m["heating_seconds"] / 60, 1),
-                round(m["error_seconds"] / 60, 1),
-                round(m["cold_seconds"] / 60, 1),
-                round(m["offline_seconds"] / 60, 1),
-                round(m[_UNTRACKED_KEY] / 60, 1),
-                m["productivity_pct"],
-            ]
-        )
-    return buf.getvalue()

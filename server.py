@@ -33,7 +33,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, 
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from production_pilot import history, scan_plcs, service_config, stats
+from production_pilot import exports, history, scan_plcs, service_config, stats
 from production_pilot.demo_source import RECIPE_OPTIONS, SimulatedSource
 from production_pilot.models import MachineGroup, MachineState
 from production_pilot.opcua_source import CONFIG_PATH, OpcUaSource
@@ -423,7 +423,7 @@ def require_level_from_header_or_query(min_level: str):
     """
     Same as require_level, but also accepts the token via a `token`
     query parameter, falling back to it only when there's no Bearer
-    header. Needed for exactly one endpoint: the CSV export, which the
+    header. Needed for the export downloads (CSV/XLSX/PDF), which the
     frontend reaches via a plain <a href> browser download so the page
     can rely on normal browser download handling — a plain link can't
     attach a custom Authorization header the way fetch() can.
@@ -508,6 +508,10 @@ class HistoryClearIn(BaseModel):
 
 class DataSourceIn(BaseModel):
     mode: str
+
+
+class ProductivityTargetIn(BaseModel):
+    target_pct: int
 
 
 class DemoSetStateIn(BaseModel):
@@ -830,6 +834,23 @@ def service_set_data_source(body: DataSourceIn, _token: str = Depends(require_le
     return {"mode": body.mode}
 
 
+@app.get("/api/service/productivity-target")
+def service_get_productivity_target(_token: str = Depends(require_level("management"))) -> dict:
+    """Management-readable (the Statistics page's KPI card needs it), but
+    only Service can change it — see the POST endpoint below."""
+    return {"target_pct": history.get_productivity_target_pct()}
+
+
+@app.post("/api/service/productivity-target")
+def service_set_productivity_target(
+    body: ProductivityTargetIn, _token: str = Depends(require_level("service"))
+) -> dict:
+    if not 0 <= body.target_pct <= 100:
+        raise HTTPException(status_code=400, detail="target_pct must be between 0 and 100")
+    history.set_productivity_target_pct(body.target_pct)
+    return {"target_pct": body.target_pct}
+
+
 def _demo_state_payload(source: SimulatedSource) -> dict:
     # Original config order (not calculated priority order, see
     # serializers.group_to_dict) — a control panel edits fixed physical
@@ -886,17 +907,41 @@ def _validate_date(date: str) -> None:
         raise HTTPException(status_code=400, detail="Invalid date — expected YYYY-MM-DD")
 
 
+_VALID_COMPARISON_BASES = {"avg_7d"}
+
+
 @app.get("/api/stats/daily-summary")
-def stats_daily_summary(date: str | None = None, _token: str = Depends(require_level("management"))) -> dict:
+def stats_daily_summary(
+    date: str | None = None, compare: str | None = None, _token: str = Depends(require_level("management"))
+) -> dict:
     date = date or stats.today_local()
     _validate_date(date)
+    if compare is not None and compare not in _VALID_COMPARISON_BASES:
+        raise HTTPException(status_code=400, detail="Invalid compare — expected avg_7d")
     # Left-joined against the currently configured PLC list so every
     # configured machine gets a row (00:00 / 0.0% if nothing's been
     # logged for it yet) instead of silently vanishing — see
     # with_all_configured_machines' docstring for why this isn't done
     # inside compute_daily_summary itself (range-summary/Trend needs the
     # un-joined, possibly-empty result to plot honest gaps).
-    return stats.with_all_configured_machines(stats.compute_daily_summary(date))
+    # boundary_mode="full_day": this is the Statistics page, which must
+    # stay a trustworthy full-day report across routine server restarts —
+    # unlike /api/stats/today-totals (see stats.compute_today_totals),
+    # this never resets mid-day.
+    summary = stats.with_all_configured_machines(stats.compute_daily_summary(date, boundary_mode="full_day"))
+    totals = stats.compute_totals(summary["machines"])
+    result = {**summary, "totals": totals}
+    # Opt-in (the Dashboard's own call doesn't need it): the 7-day window
+    # is seven extra full-day walks.
+    if compare is not None:
+        result["comparison"] = stats.compute_seven_day_average(date, totals)
+    return result
+
+
+@app.get("/api/stats/timeline")
+def stats_timeline(date: str, _token: str = Depends(require_level("management"))) -> dict:
+    _validate_date(date)
+    return stats.compute_timeline(date)
 
 
 @app.get("/api/stats/available-dates")
@@ -920,20 +965,56 @@ def stats_range_summary(start: str, end: str, _token: str = Depends(require_leve
     return stats.compute_range_summary(start, end)
 
 
+def _export_summary(date: str | None) -> tuple[str, dict]:
+    date = date or stats.today_local()
+    _validate_date(date)
+    # Same left-join (and full_day boundary — see stats_daily_summary
+    # above) as the JSON endpoint, so every export matches what the
+    # on-screen table shows for the same date.
+    return date, stats.with_all_configured_machines(stats.compute_daily_summary(date, boundary_mode="full_day"))
+
+
+def _download(content: str | bytes, media_type: str, filename: str) -> Response:
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @app.get("/api/stats/daily-summary/csv")
 def stats_daily_summary_csv(
     date: str | None = None, _token: str = Depends(require_level_from_header_or_query("management"))
 ) -> Response:
-    date = date or stats.today_local()
-    _validate_date(date)
-    # Same left-join as the JSON endpoint, so the CSV export matches what
-    # the on-screen table shows for the same date.
-    csv_text = stats.to_csv(stats.with_all_configured_machines(stats.compute_daily_summary(date)))
-    return Response(
-        content=csv_text,
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="daily-summary-{date}.csv"'},
+    date, summary = _export_summary(date)
+    return _download(exports.to_csv(summary), "text/csv", f"daily-summary-{date}.csv")
+
+
+@app.get("/api/stats/daily-summary/xlsx")
+def stats_daily_summary_xlsx(
+    date: str | None = None, _token: str = Depends(require_level_from_header_or_query("management"))
+) -> Response:
+    date, summary = _export_summary(date)
+    return _download(
+        exports.to_xlsx(summary),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        f"daily-summary-{date}.xlsx",
     )
+
+
+@app.get("/api/stats/daily-summary/pdf")
+def stats_daily_summary_pdf(
+    date: str | None = None, _token: str = Depends(require_level_from_header_or_query("management"))
+) -> Response:
+    date, summary = _export_summary(date)
+    totals = stats.compute_totals(summary["machines"])
+    pdf = exports.to_pdf(
+        summary,
+        totals=totals,
+        target_pct=history.get_productivity_target_pct(),
+        comparison=stats.compute_seven_day_average(date, totals),
+    )
+    return _download(pdf, "application/pdf", f"daily-summary-{date}.pdf")
 
 
 # Mounted last so it only catches what /api/* and /ws didn't already

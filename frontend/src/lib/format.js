@@ -48,6 +48,17 @@ export function formatHoursMinutes(seconds, language) {
   return translate(language, 'kpi_hm_format', { h, m });
 }
 
+// Picks a display unit for a chart axis from the max value (in seconds)
+// in its dataset, so short durations don't read as "0,05 Minutes" and
+// long ones don't read as an unbroken run of three-digit minutes — see
+// Statistics.svelte's charts. Boundaries: <2min -> seconds, 2min-3h ->
+// minutes, >3h -> hours.
+export function pickDurationUnit(maxSeconds) {
+  if (maxSeconds < 120) return { divisor: 1, labelKey: 'stats_axis_seconds' };
+  if (maxSeconds <= 3 * 3600) return { divisor: 60, labelKey: 'stats_axis_minutes' };
+  return { divisor: 3600, labelKey: 'stats_axis_hours' };
+}
+
 export function todayLocalDate() {
   const d = new Date();
   const mm = String(d.getMonth() + 1).padStart(2, '0');

@@ -160,10 +160,27 @@ export function getAvailableDates() {
   return serviceFetch('/api/stats/available-dates');
 }
 
-export function getDailySummary(date) {
-  return serviceFetch(`/api/stats/daily-summary?date=${encodeURIComponent(date)}`);
+export function getDailySummary(date, compare) {
+  const params = new URLSearchParams({ date });
+  if (compare) params.set('compare', compare);
+  return serviceFetch(`/api/stats/daily-summary?${params.toString()}`);
 }
 
 export function getRangeSummary(start, end) {
   return serviceFetch(`/api/stats/range-summary?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
+}
+
+export function getTimeline(date) {
+  return serviceFetch(`/api/stats/timeline?date=${encodeURIComponent(date)}`);
+}
+
+export function getProductivityTarget() {
+  return serviceFetch('/api/service/productivity-target');
+}
+
+export function setProductivityTarget(targetPct) {
+  return serviceFetch('/api/service/productivity-target', {
+    method: 'POST',
+    body: JSON.stringify({ target_pct: targetPct }),
+  });
 }

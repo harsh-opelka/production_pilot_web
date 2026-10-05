@@ -1,7 +1,7 @@
 <script>
   import Chart, { cssVar } from './chartSetup.js';
   import { translate } from './translations.js';
-  import { formatUnitLabel } from './format.js';
+  import { formatUnitLabel, pickDurationUnit } from './format.js';
 
   let { machines = [], lang = 'en', theme = 'dark' } = $props();
 
@@ -35,6 +35,13 @@
 
     const labels = data.map((m) => `${m.group_name} — ${formatUnitLabel(m.unit_number, language)}`);
 
+    // Auto-picks seconds/minutes/hours from the largest of the three
+    // duration bars, so the axis never reads in meaninglessly tiny
+    // fractions (short durations) or awkwardly large counts (long ones)
+    // — see format.js's pickDurationUnit.
+    const maxDuration = Math.max(0, ...data.map((m) => m.baking_seconds), ...data.map((m) => m.ready_seconds), ...data.map((m) => m.error_seconds));
+    const { divisor, labelKey } = pickDurationUnit(maxDuration);
+
     const next = new Chart(canvasEl, {
       type: 'bar',
       data: {
@@ -42,21 +49,21 @@
         datasets: [
           {
             label: translate(language, 'stats_metric_baking'),
-            data: data.map((m) => m.baking_seconds / 60),
+            data: data.map((m) => m.baking_seconds / divisor),
             backgroundColor: bakingColor,
-            yAxisID: 'minutes',
+            yAxisID: 'duration',
           },
           {
             label: translate(language, 'stats_metric_waiting'),
-            data: data.map((m) => m.ready_seconds / 60),
+            data: data.map((m) => m.ready_seconds / divisor),
             backgroundColor: waitingColor,
-            yAxisID: 'minutes',
+            yAxisID: 'duration',
           },
           {
             label: translate(language, 'stats_metric_error'),
-            data: data.map((m) => m.error_seconds / 60),
+            data: data.map((m) => m.error_seconds / divisor),
             backgroundColor: errorColor,
-            yAxisID: 'minutes',
+            yAxisID: 'duration',
           },
           {
             label: translate(language, 'stats_metric_productivity'),
@@ -77,11 +84,11 @@
             ticks: { color: textColor },
             grid: { color: gridColor },
           },
-          minutes: {
+          duration: {
             type: 'linear',
             position: 'left',
             beginAtZero: true,
-            title: { display: true, text: translate(language, 'stats_axis_minutes'), color: textColor },
+            title: { display: true, text: translate(language, labelKey), color: textColor },
             ticks: { color: textColor },
             grid: { color: gridColor },
           },

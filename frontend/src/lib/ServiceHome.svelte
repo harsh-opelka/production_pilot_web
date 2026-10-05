@@ -4,6 +4,7 @@
   import ChangePasswordCard from './ChangePasswordCard.svelte';
   import ChangeManagementPasswordCard from './ChangeManagementPasswordCard.svelte';
   import RecordingCard from './RecordingCard.svelte';
+  import ProductivityTargetCard from './ProductivityTargetCard.svelte';
   import DataSourceCard from './DataSourceCard.svelte';
   import InstallWizard from './InstallWizard.svelte';
 
@@ -45,6 +46,10 @@
     <div class="cards">
       <div class="card">
         <RecordingCard />
+      </div>
+
+      <div class="card">
+        <ProductivityTargetCard />
       </div>
     </div>
   </section>
