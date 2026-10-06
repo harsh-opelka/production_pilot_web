@@ -33,7 +33,7 @@ export const uiScale = persisted('pp_ui_scale', 1);
 // that sets it).
 export const page = writable('dashboard');
 
-// { connected, timestamp, groups } — same shape as GET /api/machines
+// { connected, timestamp, groups, next_action } — same shape as GET /api/machines
 export const machinesState = writable({ connected: false, timestamp: null, groups: [] });
 
 // True only while the WebSocket itself is open. The connection banner
@@ -75,3 +75,9 @@ export const sidebarOpen = writable(false);
 // by default instead of silently staying hidden. Per-device display
 // preference, like theme/lang above.
 export const statsHiddenColumns = persisted('pp_stats_hidden_columns', []);
+
+// Saved floor layout ({ groups, tvs } — see production_pilot/layout.py),
+// null until first loaded. Loaded/refreshed by Dashboard.svelte; the
+// Service floor layout editor sets it right after a save so this browser
+// shows the change immediately.
+export const floorLayout = writable(null);

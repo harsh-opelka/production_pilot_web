@@ -17,8 +17,8 @@ Duration-walk rules (see compute_daily_summary):
     day, or — if it has a transition from BEFORE the day that carried
     into it untouched — at 00:00:00 local with that carried-over state
     as a synthetic starting point (see history.get_last_transition_before).
-    This is what lets a PLC that, say, has been READY since three days
-    ago and never transitioned again show the full day as ready_seconds
+    This is what lets a PLC that, say, has been WAITING since three days
+    ago and never transitioned again show the full day as waiting_seconds
     instead of zero.
   - compute_daily_summary takes a `boundary_mode` of "since_restart" or
     "full_day":
@@ -89,13 +89,17 @@ from . import history
 from .opcua_source import CONFIG_PATH
 from .plc_config import load_config
 
-# The observed-time buckets. Everything in here is summed to form the
-# productivity denominator, so UNTRACKED_KEY is deliberately NOT a member
-# — see compute_daily_summary.
+# The observed-time buckets, one per MachineState (named
+# f"{state.name.lower()}_seconds") plus offline. Everything in here is
+# summed to form the productivity denominator, so UNTRACKED_KEY is
+# deliberately NOT a member — see compute_daily_summary and
+# productivity_pct.
 _SECONDS_KEYS = (
     "baking_seconds",
-    "ready_seconds",
+    "waiting_seconds",
     "heating_seconds",
+    "hot_seconds",
+    "blocked_seconds",
     "error_seconds",
     "cold_seconds",
     "offline_seconds",
@@ -105,6 +109,15 @@ _SECONDS_KEYS = (
 #: history.UNTRACKED_STATES). Reported alongside the buckets above, never
 #: mixed into them.
 _UNTRACKED_KEY = "untracked_seconds"
+
+
+def productivity_pct(baking_seconds: float, tracked_seconds: float) -> float:
+    """THE productivity formula, shared by every caller: baking time over
+    all observed time (the sum of _SECONDS_KEYS — so Cold, Hot, Blocked,
+    Heating, Waiting, Error and Offline all count as available time for
+    now; still to be decided whether Cold/Hot/Blocked should). 0.0 when
+    nothing was observed."""
+    return round((baking_seconds / tracked_seconds) * 100, 1) if tracked_seconds > 0 else 0.0
 
 
 def today_local() -> str:
@@ -270,8 +283,7 @@ def compute_daily_summary(date: str, boundary_mode: str = "full_day") -> dict:
         # `totals` by construction), so productivity is baking over the
         # time we were actually watching — not over wall-clock time that
         # happens to include an outage.
-        total_tracked = sum(totals.values())
-        productivity_pct = round((totals["baking_seconds"] / total_tracked) * 100, 1) if total_tracked > 0 else 0.0
+        machine_productivity = productivity_pct(totals["baking_seconds"], sum(totals.values()))
 
         # Counts genuine transitions INTO ERROR within the period — i.e.
         # real rows only (plc_rows, already trimmed to day_start), not the
@@ -290,7 +302,7 @@ def compute_daily_summary(date: str, boundary_mode: str = "full_day") -> dict:
                 "unit_number": unit_numbers.get(plc_ip, last["unit_number"]),
                 **{key: round(value) for key, value in totals.items()},
                 _UNTRACKED_KEY: round(untracked),
-                "productivity_pct": productivity_pct,
+                "productivity_pct": machine_productivity,
                 "error_count": error_count,
             }
         )
@@ -377,13 +389,12 @@ def compute_today_totals() -> dict:
         }
 
     baking = sum(m["baking_seconds"] for m in machines)
-    waiting = sum(m["ready_seconds"] for m in machines)
+    waiting = sum(m["waiting_seconds"] for m in machines)
     error = sum(m["error_seconds"] for m in machines)
     untracked = sum(m[_UNTRACKED_KEY] for m in machines)
     # _SECONDS_KEYS excludes _UNTRACKED_KEY, so server-downtime periods
     # are out of this denominator the same way they are per-machine.
     total_tracked = sum(sum(m[key] for key in _SECONDS_KEYS) for m in machines)
-    productivity_pct = round((baking / total_tracked) * 100, 1) if total_tracked > 0 else 0.0
 
     return {
         "date": date,
@@ -392,11 +403,11 @@ def compute_today_totals() -> dict:
         "waiting_seconds": waiting,
         "error_seconds": error,
         "untracked_seconds": untracked,
-        "productivity_pct": productivity_pct,
+        "productivity_pct": productivity_pct(baking, total_tracked),
     }
 
 
-_TOTALS_FIELDS = ("baking_seconds", "ready_seconds", "error_seconds", "cold_seconds", "offline_seconds")
+_TOTALS_FIELDS = ("baking_seconds", "waiting_seconds", "error_seconds", "cold_seconds", "offline_seconds")
 
 
 def compute_totals(machines: list[dict]) -> dict:
@@ -414,13 +425,16 @@ def compute_totals(machines: list[dict]) -> dict:
     totals = {key: sum(m[key] for m in machines) for key in _TOTALS_FIELDS}
     error_count = sum(m["error_count"] for m in machines)
     # _SECONDS_KEYS (not _TOTALS_FIELDS) is the full observed-time set —
-    # includes heating_seconds, which _TOTALS_FIELDS deliberately omits
-    # from the reported totals shape but which still counts as tracked
+    # includes heating/hot/blocked, which _TOTALS_FIELDS deliberately omits
+    # from the reported totals shape but which still count as tracked
     # time for the denominator, exactly as in compute_today_totals.
     total_tracked = sum(sum(m[key] for key in _SECONDS_KEYS) for m in machines)
-    productivity_pct = round((totals["baking_seconds"] / total_tracked) * 100, 1) if total_tracked > 0 else 0.0
 
-    return {**totals, "error_count": error_count, "productivity_pct": productivity_pct}
+    return {
+        **totals,
+        "error_count": error_count,
+        "productivity_pct": productivity_pct(totals["baking_seconds"], total_tracked),
+    }
 
 
 #: How many days BEFORE the selected date form the KPI cards' baseline

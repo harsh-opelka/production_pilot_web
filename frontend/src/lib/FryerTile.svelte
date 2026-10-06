@@ -1,15 +1,23 @@
 <script>
   // Block-view only — the list view is a table (see MachineGroupSection.svelte
   // + MachineListRow.svelte), not a mode of this tile.
-  import { formatDuration, formatUnitNumber, stateLabel } from './format.js';
+  import {
+    BLANK,
+    formatDuration,
+    formatRecipe,
+    formatTemperature,
+    formatUnitNumber,
+    heatingFillLevel,
+    stateLabel,
+  } from './format.js';
   import { nowTick } from './stores.js';
   import { translate } from './translations.js';
 
   // isNext/tier: whether this tile is the single machine the Next Action
   // banner currently points at, and which tier drove that pick (see
   // TopBar.svelte + nextAction.js — this never recomputes priority itself,
-  // just mirrors the same computeNextAction() result the caller already
-  // has). tier is only meaningful when isNext is true.
+  // just mirrors the backend's next_action the caller already has). tier
+  // is only meaningful when isNext is true.
   let { plc, language = 'en', isNext = false, tier = null } = $props();
 
   // "Fast fertig"/"Almost finished" override: its own bright warning-
@@ -26,18 +34,57 @@
   // ticks off the shared nowTick clock rather than its own interval, and
   // is derived from the server's state_entered_at so a reload resumes
   // from the true elapsed value instead of zero.
-  const TIMER_STATES = new Set(['COLD', 'HEATING', 'READY', 'ERROR']);
+  const TIMER_STATES = new Set(['COLD', 'HEATING', 'HOT', 'WAITING', 'BLOCKED', 'ERROR']);
   let showElapsed = $derived(!showRemaining && plc.is_online && TIMER_STATES.has(plc.state) && plc.state_entered_at != null);
   let elapsedText = $derived(showElapsed ? formatDuration(($nowTick - Date.parse(plc.state_entered_at)) / 1000, language) : '');
 
   let tileStyle = $derived(
-    plc.is_online ? `--tile-bg: var(--state-${stateKey}); --tile-fg: var(--state-${stateKey}-fg);` : '',
+    !plc.is_online
+      ? ''
+      : fillLevel != null
+        ? // Heating with a known level: neutral "empty" tile, orange fill below.
+          '--tile-bg: var(--heating-empty-bg); --tile-fg: var(--state-heating-fg);'
+        : `--tile-bg: var(--state-${stateKey}); --tile-fg: var(--state-${stateKey}-fg);`,
   );
   // Only meaningful (and only applied) while isNext is true — see .tile.next-priority.tier-* below.
   let tierClass = $derived(isNext && tier ? `tier-${tier}` : '');
+
+  // Blank ("—") rather than stale or invented values while offline.
+  let recipeText = $derived(plc.is_online ? formatRecipe(plc.recipe_name) : formatRecipe(null));
+  let temperatureText = $derived(
+    plc.is_online ? formatTemperature(plc.oil_temp_current, plc.oil_temp_target) : formatTemperature(null, null),
+  );
+
+  // Hot/Cold are decided by the oil temperature (backend, see
+  // production_pilot/hot_cold.py), so on those two tiles the CURRENT
+  // temperature is the headline: shown big, the target small beside it.
+  let emphasizeCurrent = $derived(
+    plc.is_online && (plc.state === 'HOT' || plc.state === 'COLD') && plc.oil_temp_current != null,
+  );
+  let targetText = $derived(plc.oil_temp_target != null ? String(Math.round(plc.oil_temp_target)) : BLANK);
+
+  // Heating only: a rising "oil level" behind the text (null = no fill —
+  // then the tile stays the plain solid Heating orange; see tileStyle).
+  let fillLevel = $derived(
+    plc.is_online && plc.state === 'HEATING' ? heatingFillLevel(plc.oil_temp_current, plc.oil_temp_target) : null,
+  );
 </script>
 
-<div class="tile {tierClass}" class:offline={!plc.is_online} class:next-priority={isNext} style={tileStyle}>
+<div
+  class="tile {tierClass}"
+  class:offline={!plc.is_online}
+  class:blocked={plc.is_online && plc.state === 'BLOCKED'}
+  class:heating-level={fillLevel != null}
+  class:next-priority={isNext}
+  style={tileStyle}
+>
+  {#if fillLevel != null}
+    <!-- Own clipping box (not overflow:hidden on .tile, which would clip
+         the NEXT badge sticking out of the corner). -->
+    <div class="fill-clip" aria-hidden="true">
+      <div class="fill" style="height: {fillLevel * 100}%;"><div class="wave"></div></div>
+    </div>
+  {/if}
   {#if isNext}
     <div class="next-badge">{translate(language, 'tile_next_badge')}</div>
   {/if}
@@ -50,15 +97,24 @@
       <div class="time">{elapsedText}</div>
     {/if}
   </div>
-  <div class="recipe">{plc.recipe ?? ''}</div>
+  <div class="details">
+    <div class="recipe" title={recipeText}>{recipeText}</div>
+    {#if emphasizeCurrent}
+      <div class="temperature emphasized">
+        <span class="temp-current">{Math.round(plc.oil_temp_current)} °C</span>
+        <span class="temp-target">/ {targetText} °C</span>
+      </div>
+    {:else}
+      <div class="temperature">{temperatureText}</div>
+    {/if}
+  </div>
 </div>
 
 <style>
   /* Grid rows (not a single centered flex stack): unit pinned to the top,
-     recipe pinned to the bottom, state+time centered in the flexible
-     middle row — see .middle. The recipe cell is always rendered (even
-     when empty) so its reserved bottom row keeps tile height/layout
-     identical whether or not a recipe is set, across every state colour. */
+     recipe + temperature pinned to the bottom, state+time centered in the
+     flexible middle row — see .middle. The bottom lines always render
+     (as "—" when unknown) so tile height/layout never shift. */
   .tile {
     --tile-bg: var(--offline-bg);
     --tile-fg: var(--offline-fg);
@@ -75,11 +131,29 @@
     border: none;
     box-shadow: var(--tile-shadow);
     height: clamp(13.75rem, 22vh, 16.25rem);
+    min-width: 0;
     padding: clamp(0.75rem, 1.5vw, 1.5rem);
     display: grid;
     grid-template-rows: auto 1fr auto;
     justify-items: center;
     text-align: center;
+  }
+
+  /* Heating with a known oil level: white (light theme) / light slate
+     (dark theme) "empty" tile with a thin neutral border, the orange level
+     rising inside. Border via inset box-shadow so the tile's box never
+     changes size. */
+  .tile.heating-level {
+    box-shadow:
+      var(--tile-shadow),
+      inset 0 0 0 1px var(--heating-empty-border);
+  }
+
+  /* Blocked: slate with a dashed border, at full opacity — the dashed
+     edge says "held up", the solid colour says "online" (unlike the dimmed
+     dashed Offline tile below). */
+  .tile.blocked {
+    border: 2px dashed var(--state-blocked-border);
   }
 
   .tile.offline {
@@ -112,9 +186,74 @@
     --tile-accent-glow: rgba(250, 204, 21, 0.4);
   }
 
-  .tile.next-priority.tier-ready {
-    --tile-accent: var(--opelka-blue);
+  .tile.next-priority.tier-load {
+    --tile-accent: var(--state-waiting);
     --tile-accent-glow: rgba(5, 52, 108, 0.35);
+  }
+
+  .tile.next-priority.tier-hot {
+    --tile-accent: var(--state-hot);
+    --tile-accent-glow: rgba(147, 51, 234, 0.4);
+  }
+
+  /* Text sits above the heating fill (which is absolutely positioned and
+     so not a grid row of its own). */
+  .unit,
+  .middle,
+  .details {
+    position: relative;
+    z-index: 1;
+  }
+
+  .fill-clip {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  /* Height is set inline from the fill level; the transition makes it
+     rise smoothly between ~0.5 s polls instead of jumping. Only height
+     changes — the tile's own box never moves or resizes. */
+  .fill {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    /* Exactly the legend's Heating orange. */
+    background: var(--state-heating);
+    transition: height 1.5s ease;
+  }
+
+  /* Subtle wave along the fill's top edge: a strip twice the tile width,
+     slid sideways with a compositor-only transform — no JS, no layout. */
+  .wave {
+    position: absolute;
+    top: -0.3rem;
+    left: 0;
+    width: 200%;
+    height: 0.6rem;
+    background: radial-gradient(ellipse 1.5rem 0.45rem at 1.5rem 0.6rem, var(--state-heating) 98%, transparent 100%)
+      repeat-x;
+    background-size: 3rem 0.6rem;
+    animation: wave 6s linear infinite;
+    will-change: transform;
+  }
+
+  @keyframes wave {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .wave {
+      display: none;
+    }
   }
 
   .next-badge {
@@ -136,8 +275,8 @@
   .unit {
     align-self: start;
     font-size: var(--font-tile-unit);
-    font-weight: 400;
-    line-height: 1.1;
+    font-weight: 800;
+    line-height: 1;
   }
 
   .middle {
@@ -159,10 +298,44 @@
     font-variant-numeric: tabular-nums;
   }
 
-  .recipe {
+  .details {
     align-self: end;
-    min-height: 1em;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.1em;
     font-size: var(--font-tile-sub);
+    line-height: 1.2;
+  }
+
+  .recipe {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 400;
+    opacity: 0.85;
+  }
+
+  .temperature {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .temperature.emphasized {
+    display: flex;
+    align-items: baseline;
+    gap: 0.35em;
+  }
+
+  .temp-current {
+    font-size: var(--font-tile-time);
+    font-weight: 800;
+  }
+
+  .temp-target {
     font-weight: 400;
     opacity: 0.85;
   }

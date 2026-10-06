@@ -13,7 +13,7 @@ Covers:
   3. Re-ordering priority changes default_priority but never unit_number.
   4. Missing / non-positive / duplicate machine numbers within a group
      are rejected; the same number in two different groups is fine.
-  5. calculate_priority() output is unchanged for the same states,
+  5. select_next_action() picks the same PLC for the same states,
      whatever the machine numbers are.
 """
 
@@ -27,7 +27,7 @@ from .demo_source import SimulatedSource
 from .models import MachineState
 from .opcua_source import OpcUaSource
 from .plc_config import load_config, unit_number_problem
-from .priority import calculate_priority
+from .priority import select_next_action
 
 IP_A = "192.168.178.150"
 IP_B = "192.168.178.151"
@@ -128,25 +128,26 @@ def main() -> bool:
     results.append(_check("same number in two different groups accepted",
                           _units_by_ip(OpcUaSource(two_groups)), {IP_A: 1, IP_B: 2, IP_C: 1, IP_D: 2}))
 
-    # --- 5. calculate_priority unchanged --------------------------------
+    # --- 5. Next Action pick unchanged -----------------------------------
     states = {
-        IP_A: (MachineState.READY, None),
+        IP_A: (MachineState.WAITING, None),
         IP_B: (MachineState.BAKING, 20),
         IP_C: (MachineState.ERROR, None),
         IP_D: (MachineState.HEATING, None),
     }
 
-    def priority_order(path: Path) -> list[str]:
-        group = OpcUaSource(path)._groups[0]
-        for plc in group.plcs:
+    def next_action_ip(path: Path, without: str | None = None) -> str | None:
+        plcs = OpcUaSource(path)._groups[0].plcs
+        for plc in plcs:
             plc.state, plc.remaining_seconds = states[plc.ip]
-            plc.is_online = True
-        return [plc.ip for plc in calculate_priority(group)]
+            plc.is_online = plc.ip != without
+        return select_next_action(plcs)["ip"]
 
-    results.append(_check("calculate_priority: same order with or without custom numbers",
-                          priority_order(new_path), priority_order(old_path)))
-    results.append(_check("calculate_priority: ERROR, then READY/near-done BAKING by saved order, then HEATING",
-                          priority_order(new_path), [IP_C, IP_A, IP_B, IP_D]))
+    results.append(_check("next action: same pick with or without custom numbers",
+                          next_action_ip(new_path), next_action_ip(old_path)))
+    results.append(_check("next action: ERROR first", next_action_ip(new_path), IP_C))
+    results.append(_check("next action: WAITING once the ERROR machine is gone",
+                          next_action_ip(new_path, without=IP_C), IP_A))
 
     all_passed = all(results)
     print()

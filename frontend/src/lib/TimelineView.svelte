@@ -116,9 +116,11 @@
   });
 
   const LEGEND_ITEMS = [
-    { key: 'ready', labelKey: 'state_ready' },
+    { key: 'waiting', labelKey: 'state_waiting' },
     { key: 'baking', labelKey: 'state_baking' },
     { key: 'heating', labelKey: 'state_heating' },
+    { key: 'hot', labelKey: 'state_hot' },
+    { key: 'blocked', labelKey: 'state_blocked' },
     { key: 'cold', labelKey: 'state_cold' },
     { key: 'error', labelKey: 'state_error' },
     { key: 'offline', labelKey: 'status_offline' },
@@ -255,8 +257,18 @@
     opacity: 1;
   }
 
-  .seg-ready {
-    background: var(--state-ready);
+  .seg-waiting {
+    background: var(--state-waiting);
+  }
+
+  .seg-hot {
+    background: var(--state-hot);
+  }
+
+  .seg-blocked {
+    background: var(--state-blocked);
+    border-left: 1px dashed var(--state-blocked-border);
+    border-right: 1px dashed var(--state-blocked-border);
   }
 
   .seg-baking {

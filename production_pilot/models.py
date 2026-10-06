@@ -4,23 +4,29 @@ from enum import Enum
 
 
 class MachineState(Enum):
-    COLD    = "Cold"
-    HEATING = "Heating"
-    READY   = "Ready"
-    BAKING  = "Baking"
     ERROR   = "Error"
+    COLD    = "Cold"
+    HOT     = "Hot"       # hot, but NOT in auto mode — needs switching to auto
+    HEATING = "Heating"
+    WAITING = "Waiting"   # empty and ready to load (called READY before state mapping v2)
+    BLOCKED = "Blocked"   # waiting for another machine — nothing to do here
+    BAKING  = "Baking"
 
 
-# Colors used by the UI — defined once here so both views stay in sync.
+# V1 (Qt) colour table — not read by the V2 web UI, whose single source
+# of truth for state colours is frontend/src/app.css (--state-* tokens).
+# Kept in step with those tokens so the two never disagree.
 # OFFLINE is not a state (see PlcData.is_online); it's a connection
 # condition that can co-occur with any of the states above, rendered via
 # OFFLINE_STYLE instead of a state color.
 STATE_COLORS: dict[MachineState, dict[str, str]] = {
-    MachineState.COLD:    {"bg": "#6B7280", "fg": "#FFFFFF"},  # Grey
-    MachineState.HEATING: {"bg": "#F59E0B", "fg": "#1C1C1C"},  # Amber
-    MachineState.READY:   {"bg": "#1D4ED8", "fg": "#FFFFFF"},  # Blue  — call to action
-    MachineState.BAKING:  {"bg": "#16A34A", "fg": "#FFFFFF"},  # Green — process running
     MachineState.ERROR:   {"bg": "#DC2626", "fg": "#FFFFFF"},  # Red
+    MachineState.COLD:    {"bg": "#6B7280", "fg": "#FFFFFF"},  # Grey
+    MachineState.HOT:     {"bg": "#9333EA", "fg": "#FFFFFF"},  # Purple
+    MachineState.HEATING: {"bg": "#F59E0B", "fg": "#1C1C1C"},  # Amber
+    MachineState.WAITING: {"bg": "#05346C", "fg": "#FFFFFF"},  # Opelka blue — call to action
+    MachineState.BLOCKED: {"bg": "#334E68", "fg": "#FFFFFF"},  # Slate, dashed border in the UI
+    MachineState.BAKING:  {"bg": "#16A34A", "fg": "#FFFFFF"},  # Green — process running
 }
 
 # Describes the visual treatment for an offline PLC: a neutral dark grey
@@ -38,13 +44,19 @@ OFFLINE_STYLE: dict[str, object] = {
 
 
 # Maps the integer value of the "::auto:external_machine_state" OPC UA
-# node (confirmed by Tim, identical on every PLC) to MachineState.
+# node (identical on every PLC) to MachineState. State mapping v2 (Tim):
+# 0..6 below REPLACES the old 0 Error / 1 Cold / 2 Heating / 3 Ready /
+# 4 Baking mapping. history.db stores state NAMES, not these integers —
+# see history.migrate_state_mapping for the matching READY -> WAITING
+# rename of old rows.
 OPCUA_STATE_MAP: dict[int, MachineState] = {
     0: MachineState.ERROR,
     1: MachineState.COLD,
-    2: MachineState.HEATING,
-    3: MachineState.READY,
-    4: MachineState.BAKING,
+    2: MachineState.HOT,
+    3: MachineState.HEATING,
+    4: MachineState.WAITING,
+    5: MachineState.BLOCKED,
+    6: MachineState.BAKING,
 }
 
 
@@ -58,7 +70,9 @@ class PlcData:
     remaining_seconds: int | None = None   # only meaningful when BAKING
     default_priority:  int = 0             # index in saved install-time order, 0 = highest
     unit_number:       int = 0             # 1-based position within the machine; display layer builds a translated "{unit word} {n}" label from this (see utils.format_unit_name), so switching language updates it live
-    recipe:            str | None = None   # current recipe/product name — plumbing only for now; no OPC UA node for this exists yet (pending a node ID from Tim), so this is always None until something actually sets it. Never fabricate a value here.
+    recipe_name:       str | None = None   # current recipe/format name (OPC UA ::AsGlobalPV:gFormatVerwaltung.ActFormatName). None = unknown/empty — never fabricate a value here in real mode.
+    oil_temp_current:  float | None = None # °C, OPC UA ::tempregl:ActOilTemp. None = not readable.
+    oil_temp_target:   float | None = None # °C, OPC UA ::AsGlobalPV:gFormatSet.BackTemperatur. None = not readable.
     state_entered_at:  str | None = None   # ISO 8601 UTC timestamp of the most recent transition INTO the current state — set by server.py's poll loop (see _detect_and_log_transitions), regardless of whether history recording is on. Lets the frontend show a live elapsed-time timer without a server round-trip every second.
 
     def to_dict(self) -> dict:
@@ -79,7 +93,9 @@ class PlcData:
             "is_online": self.is_online,
             "remaining_seconds": self.remaining_seconds,
             "default_priority": self.default_priority,
-            "recipe": self.recipe,
+            "recipe_name": self.recipe_name,
+            "oil_temp_current": self.oil_temp_current,
+            "oil_temp_target": self.oil_temp_target,
             "state_entered_at": self.state_entered_at,
         }
 

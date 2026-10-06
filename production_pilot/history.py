@@ -23,6 +23,7 @@ the DB, since it's checked on every ~0.5s poll cycle.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -36,6 +37,13 @@ _DATA_SOURCE_KEY = "data_source_mode"
 _DEFAULT_DATA_SOURCE_MODE = "real"
 _PRODUCTIVITY_TARGET_KEY = "productivity_target_pct"
 _DEFAULT_PRODUCTIVITY_TARGET_PCT = "70"
+_FLOOR_LAYOUT_KEY = "floor_layout"
+_HOT_COLD_THRESHOLD_KEY = "hot_cold_threshold_c"
+_DEFAULT_HOT_COLD_THRESHOLD_C = "50"
+_STATE_MAPPING_VERSION_KEY = "state_mapping_version"
+#: Current state-name vocabulary in state_transitions — see
+#: migrate_state_mapping.
+STATE_MAPPING_VERSION = 2
 _TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 # Server-lifecycle markers, written into state_transitions.new_state.
@@ -62,6 +70,7 @@ _db_lock = threading.Lock()
 _recording_enabled = False  # cache; authoritative value lives in app_settings
 _data_source_mode = _DEFAULT_DATA_SOURCE_MODE  # cache; authoritative value lives in app_settings
 _productivity_target_pct = int(_DEFAULT_PRODUCTIVITY_TARGET_PCT)  # cache; authoritative value lives in app_settings
+_hot_cold_threshold_c = float(_DEFAULT_HOT_COLD_THRESHOLD_C)  # cache; read every poll, authoritative value lives in app_settings
 
 # This PROCESS's own start instant (ISO UTC string, history's fixed-width
 # format) — set once by server.py's lifespan startup handler, live only in
@@ -133,7 +142,7 @@ def init_db() -> None:
     just works. Also primes the in-memory caches from whatever's on disk
     (so a restart resumes whichever state the technician last set). Call
     once at startup."""
-    global _recording_enabled, _data_source_mode, _productivity_target_pct
+    global _recording_enabled, _data_source_mode, _productivity_target_pct, _hot_cold_threshold_c
     with _db_lock, _connection() as conn:
         conn.execute(
             """
@@ -169,6 +178,10 @@ def init_db() -> None:
             "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)",
             (_PRODUCTIVITY_TARGET_KEY, _DEFAULT_PRODUCTIVITY_TARGET_PCT),
         )
+        conn.execute(
+            "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)",
+            (_HOT_COLD_THRESHOLD_KEY, _DEFAULT_HOT_COLD_THRESHOLD_C),
+        )
         row = conn.execute(
             "SELECT value FROM app_settings WHERE key = ?", (_RECORDING_KEY,)
         ).fetchone()
@@ -181,6 +194,59 @@ def init_db() -> None:
             "SELECT value FROM app_settings WHERE key = ?", (_PRODUCTIVITY_TARGET_KEY,)
         ).fetchone()
         _productivity_target_pct = int(row["value"]) if row is not None else int(_DEFAULT_PRODUCTIVITY_TARGET_PCT)
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = ?", (_HOT_COLD_THRESHOLD_KEY,)
+        ).fetchone()
+        _hot_cold_threshold_c = float(row["value"]) if row is not None else float(_DEFAULT_HOT_COLD_THRESHOLD_C)
+    migrate_state_mapping()
+
+
+def _backup_path() -> Path:
+    return DB_PATH.with_name(DB_PATH.name + ".bak-before-state-v2")
+
+
+def migrate_state_mapping() -> int | None:
+    """One-time, idempotent upgrade of state_transitions to state mapping
+    v2 (see models.OPCUA_STATE_MAP). Rows store the MachineState NAME, not
+    the PLC integer, so no value remap is needed — the only change is the
+    renamed member: READY -> WAITING, in both new_state and old_state.
+
+    Guarded by app_settings.state_mapping_version, so it runs at most once
+    per database. Before touching any row it writes a consistent copy of
+    the database next to it (history.db.bak-before-state-v2, via SQLite's
+    online backup API; an existing backup is never overwritten).
+
+    Returns the number of rows changed, or None if the migration had
+    already run. Called from init_db()."""
+    with _db_lock, _connection() as conn:
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = ?", (_STATE_MAPPING_VERSION_KEY,)
+        ).fetchone()
+        if row is not None and int(row["value"]) >= STATE_MAPPING_VERSION:
+            return None
+
+        changed = conn.execute(
+            "SELECT COUNT(*) FROM state_transitions WHERE new_state = 'READY' OR old_state = 'READY'"
+        ).fetchone()[0]
+        if changed:
+            backup = _backup_path()
+            if not backup.exists():
+                dest = sqlite3.connect(backup)
+                try:
+                    conn.backup(dest)
+                finally:
+                    dest.close()
+            conn.execute("UPDATE state_transitions SET new_state = 'WAITING' WHERE new_state = 'READY'")
+            conn.execute("UPDATE state_transitions SET old_state = 'WAITING' WHERE old_state = 'READY'")
+        conn.execute(
+            """
+            INSERT INTO app_settings (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (_STATE_MAPPING_VERSION_KEY, str(STATE_MAPPING_VERSION)),
+        )
+    print(f"[history] state mapping v{STATE_MAPPING_VERSION}: renamed READY -> WAITING in {changed} row(s)")
+    return changed
 
 
 def is_recording_enabled() -> bool:
@@ -238,6 +304,51 @@ def set_productivity_target_pct(target_pct: int) -> None:
             (_PRODUCTIVITY_TARGET_KEY, str(target_pct)),
         )
     _productivity_target_pct = target_pct
+
+
+def get_hot_cold_threshold_c() -> float:
+    """In-memory cache — the poll loop reads this every ~0.5 s (see
+    hot_cold.py), so a new value takes effect on the next poll."""
+    return _hot_cold_threshold_c
+
+
+def set_hot_cold_threshold_c(threshold_c: float) -> None:
+    """Caller is expected to have already validated the value (see
+    hot_cold.validate_threshold) — this always writes what it's given."""
+    global _hot_cold_threshold_c
+    with _db_lock, _connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO app_settings (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (_HOT_COLD_THRESHOLD_KEY, repr(float(threshold_c))),
+        )
+    _hot_cold_threshold_c = float(threshold_c)
+
+
+def get_floor_layout() -> dict | None:
+    """The saved dashboard floor layout (see layout.py for its shape), or
+    None if none has been saved. Read on demand (GET /api/layout), not on
+    the poll path, so no in-memory cache."""
+    with _db_lock, _connection() as conn:
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = ?", (_FLOOR_LAYOUT_KEY,)
+        ).fetchone()
+    return json.loads(row["value"]) if row is not None else None
+
+
+def set_floor_layout(layout: dict) -> None:
+    """Caller is expected to have already validated `layout` (see
+    layout.validate_layout) — this always writes what it's given."""
+    with _db_lock, _connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO app_settings (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (_FLOOR_LAYOUT_KEY, json.dumps(layout)),
+        )
 
 
 def record_transition(

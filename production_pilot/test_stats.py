@@ -17,6 +17,8 @@ Covers:
   3. Downtime carried across midnight — the originally reported bug:
      a server left off overnight must not hand the next day's summary a
      full day of whatever state each machine was last seen in.
+  4. Hot / Blocked buckets, and the one-time READY -> WAITING history
+     migration for state mapping v2 (idempotent, backed up, runs once).
 
 Each scenario runs against its own throwaway sqlite file (history.DB_PATH
 is repointed for the duration of this process) so none of this ever
@@ -103,20 +105,20 @@ def test_day_boundary_carry_over() -> list[bool]:
     day2_start = history.local_day_start_utc(DAY2)
 
     with sqlite3.connect(history.DB_PATH) as conn:
-        # READY at 23:50 on day1 (10 min before day2's local midnight)...
-        _insert(conn, timestamp=_ts(day2_start, minutes=-10), old_state="COLD", new_state="READY")
+        # WAITING at 23:50 on day1 (10 min before day2's local midnight)...
+        _insert(conn, timestamp=_ts(day2_start, minutes=-10), old_state="COLD", new_state="WAITING")
         # ...then BAKING at 08:00 on day2.
-        _insert(conn, timestamp=_ts(day2_start, hours=8), old_state="READY", new_state="BAKING")
+        _insert(conn, timestamp=_ts(day2_start, hours=8), old_state="WAITING", new_state="BAKING")
         conn.commit()
 
     m2 = _machine(stats.compute_daily_summary(DAY2))
-    results.append(_check("day2 ready_seconds == 8h (carried over from day1)", m2["ready_seconds"], 8 * 3600))
+    results.append(_check("day2 waiting_seconds == 8h (carried over from day1)", m2["waiting_seconds"], 8 * 3600))
     results.append(_check("day2 baking_seconds == 16h (08:00 -> day2 end)", m2["baking_seconds"], 16 * 3600))
 
-    # day1's real 23:50 transition holds READY only to day1's own end (10
+    # day1's real 23:50 transition holds WAITING only to day1's own end (10
     # minutes) — it is NOT borrowed forward into day2's BAKING total.
     m1 = _machine(stats.compute_daily_summary(DAY1))
-    results.append(_check("day1 ready_seconds == 10min (unaffected by carry-over)", m1["ready_seconds"], 10 * 60))
+    results.append(_check("day1 waiting_seconds == 10min (unaffected by carry-over)", m1["waiting_seconds"], 10 * 60))
     results.append(_check("day1 baking_seconds == 0 (BAKING transition belongs to day2)", m1["baking_seconds"], 0))
     return results
 
@@ -129,8 +131,8 @@ def test_downtime_excluded_within_a_day() -> list[bool]:
     start = history.local_day_start_utc(DAY2)
 
     with sqlite3.connect(history.DB_PATH) as conn:
-        _insert(conn, timestamp=_ts(start, hours=8), old_state="COLD", new_state="READY")
-        _insert(conn, timestamp=_ts(start, hours=10), old_state="READY", new_state="BAKING")
+        _insert(conn, timestamp=_ts(start, hours=8), old_state="COLD", new_state="WAITING")
+        _insert(conn, timestamp=_ts(start, hours=10), old_state="WAITING", new_state="BAKING")
         # Server shut down at 11:00, back up at 15:00. The UNKNOWN marker
         # and the poll loop's first row share an instant (as they do in
         # practice, a poll cycle apart); insertion order breaks the tie.
@@ -138,12 +140,12 @@ def test_downtime_excluded_within_a_day() -> list[bool]:
                 new_state=history.SERVER_STOPPED_MARKER, was_online=0)
         _insert(conn, timestamp=_ts(start, hours=15), old_state=history.SERVER_STOPPED_MARKER,
                 new_state=history.UNKNOWN_MARKER, was_online=0)
-        _insert(conn, timestamp=_ts(start, hours=15), old_state=None, new_state="READY")
+        _insert(conn, timestamp=_ts(start, hours=15), old_state=None, new_state="WAITING")
         conn.commit()
 
     m = _machine(stats.compute_daily_summary(DAY2))
     # 08:00 -> 10:00, plus 15:00 -> end of day.
-    results.append(_check("ready_seconds == 11h (observed periods only)", m["ready_seconds"], 11 * 3600))
+    results.append(_check("waiting_seconds == 11h (observed periods only)", m["waiting_seconds"], 11 * 3600))
     results.append(_check("baking_seconds == 1h (10:00 -> 11:00)", m["baking_seconds"], 3600))
     results.append(_check("untracked_seconds == 4h (11:00 -> 15:00 downtime)", m["untracked_seconds"], 4 * 3600))
     # Marker rows carry was_online = 0, but "the server was down" is not
@@ -164,26 +166,26 @@ def test_downtime_carried_over_midnight() -> list[bool]:
     day2_start = history.local_day_start_utc(DAY2)
 
     with sqlite3.connect(history.DB_PATH) as conn:
-        # READY at 18:00 on day1, server stopped five minutes later...
-        _insert(conn, timestamp=_ts(day2_start, hours=-6), old_state="COLD", new_state="READY")
-        _insert(conn, timestamp=_ts(day2_start, hours=-5, minutes=-55), old_state="READY",
+        # WAITING at 18:00 on day1, server stopped five minutes later...
+        _insert(conn, timestamp=_ts(day2_start, hours=-6), old_state="COLD", new_state="WAITING")
+        _insert(conn, timestamp=_ts(day2_start, hours=-5, minutes=-55), old_state="WAITING",
                 new_state=history.SERVER_STOPPED_MARKER, was_online=0)
         # ...and back up at 09:00 the next morning.
         _insert(conn, timestamp=_ts(day2_start, hours=9), old_state=history.SERVER_STOPPED_MARKER,
                 new_state=history.UNKNOWN_MARKER, was_online=0)
-        _insert(conn, timestamp=_ts(day2_start, hours=9), old_state=None, new_state="READY")
+        _insert(conn, timestamp=_ts(day2_start, hours=9), old_state=None, new_state="WAITING")
         conn.commit()
 
     m = _machine(stats.compute_daily_summary(DAY2))
     # Before the fix this read 24h: the overnight stretch carried into
-    # day2 as READY, so the whole day was credited to it.
-    results.append(_check("day2 ready_seconds == 15h (09:00 -> end, not 24h)", m["ready_seconds"], 15 * 3600))
+    # day2 as WAITING, so the whole day was credited to it.
+    results.append(_check("day2 waiting_seconds == 15h (09:00 -> end, not 24h)", m["waiting_seconds"], 15 * 3600))
     results.append(_check("day2 untracked_seconds == 9h (midnight -> 09:00)", m["untracked_seconds"], 9 * 3600))
     results.append(_check("day2 offline_seconds == 0", m["offline_seconds"], 0))
 
-    # day1 keeps only the five minutes it actually observed READY.
+    # day1 keeps only the five minutes it actually observed WAITING.
     m1 = _machine(stats.compute_daily_summary(DAY1))
-    results.append(_check("day1 ready_seconds == 5min (18:00 -> 18:05)", m1["ready_seconds"], 5 * 60))
+    results.append(_check("day1 waiting_seconds == 5min (18:00 -> 18:05)", m1["waiting_seconds"], 5 * 60))
     results.append(_check("day1 untracked_seconds == 5h55m (18:05 -> midnight)",
                           m1["untracked_seconds"], 5 * 3600 + 55 * 60))
     return results
@@ -197,32 +199,32 @@ def test_ungraceful_shutdown_no_server_stopped_row() -> list[bool]:
     start = history.local_day_start_utc(DAY2)
 
     with sqlite3.connect(history.DB_PATH) as conn:
-        # READY at 08:00. Process is then hard-killed a few seconds
+        # WAITING at 08:00. Process is then hard-killed a few seconds
         # later with NO SERVER_STOPPED row (taskkill /F, PyCharm's Stop
         # button on Windows, a crash, power loss — see server.py's
         # lifespan shutdown handler docstring on why this is the
         # unreliable half of the pair). The only evidence anything
         # happened at all is the next startup's UNKNOWN marker at 10:00
-        # (~2h later), whose old_state is READY -- the state that was
+        # (~2h later), whose old_state is WAITING -- the state that was
         # active when the process died, NOT a SERVER_STOPPED row.
-        _insert(conn, timestamp=_ts(start, hours=8), old_state="COLD", new_state="READY")
-        _insert(conn, timestamp=_ts(start, hours=10), old_state="READY",
+        _insert(conn, timestamp=_ts(start, hours=8), old_state="COLD", new_state="WAITING")
+        _insert(conn, timestamp=_ts(start, hours=10), old_state="WAITING",
                 new_state=history.UNKNOWN_MARKER, was_online=0)
-        _insert(conn, timestamp=_ts(start, hours=10), old_state=None, new_state="READY")
+        _insert(conn, timestamp=_ts(start, hours=10), old_state=None, new_state="WAITING")
         conn.commit()
 
     m = _machine(stats.compute_daily_summary(DAY2))
     # Before this fix, the 08:00->10:00 segment was bucketed under its
-    # OWN new_state (READY) all the way to the next row's start (the
-    # UNKNOWN marker) -- so the entire 2h outage read as ready_seconds,
+    # OWN new_state (WAITING) all the way to the next row's start (the
+    # UNKNOWN marker) -- so the entire 2h outage read as waiting_seconds,
     # and untracked_seconds only ever caught the UNKNOWN row's own
     # (near-instant) forward span. That's the exact bug report: Waiting
     # time inflated by real downtime, fixable only by clearing history.
-    # ready_seconds should be ONLY the genuine post-restart span
+    # waiting_seconds should be ONLY the genuine post-restart span
     # (10:00 -> day end, 14h) -- the pre-outage 08:00->10:00 span is
     # untrustworthy in full and must NOT also be folded into this total.
-    results.append(_check("ready_seconds == 14h (only the genuine post-restart span, 10:00 -> day end)",
-                          m["ready_seconds"], 14 * 3600))
+    results.append(_check("waiting_seconds == 14h (only the genuine post-restart span, 10:00 -> day end)",
+                          m["waiting_seconds"], 14 * 3600))
     results.append(_check("untracked_seconds == 2h (08:00 -> 10:00, the whole unobserved span, not just the marker instant)",
                           m["untracked_seconds"], 2 * 3600))
     return results
@@ -238,22 +240,22 @@ def test_today_restart_boundary() -> list[bool]:
     restart_at = _ts(today_start, hours=1)
 
     with sqlite3.connect(history.DB_PATH) as conn:
-        # Pre-restart: READY starting 40 minutes before the simulated
+        # Pre-restart: WAITING starting 40 minutes before the simulated
         # restart instant (today_start+01:00) -- this must be discarded
-        # entirely, not folded into today's ready_seconds.
-        _insert(conn, timestamp=_ts(today_start, minutes=20), old_state="COLD", new_state="READY")
+        # entirely, not folded into today's waiting_seconds.
+        _insert(conn, timestamp=_ts(today_start, minutes=20), old_state="COLD", new_state="WAITING")
         # Post-restart, as the poll loop's own first cycles would log:
-        # carried-over READY until the first real transition, then BAKING,
+        # carried-over WAITING until the first real transition, then BAKING,
         # then COLD (left open so its duration depends on "now" and isn't
         # asserted here).
-        _insert(conn, timestamp=_ts(today_start, hours=1, minutes=30), old_state="READY", new_state="BAKING")
+        _insert(conn, timestamp=_ts(today_start, hours=1, minutes=30), old_state="WAITING", new_state="BAKING")
         _insert(conn, timestamp=_ts(today_start, hours=2), old_state="BAKING", new_state="COLD")
         conn.commit()
 
     history.set_server_started_at(restart_at)
     m = _machine(stats.compute_daily_summary(today, boundary_mode="since_restart"))
-    results.append(_check("since_restart: ready_seconds == 30min (restart -> first post-restart transition only)",
-                          m["ready_seconds"], 30 * 60))
+    results.append(_check("since_restart: waiting_seconds == 30min (restart -> first post-restart transition only)",
+                          m["waiting_seconds"], 30 * 60))
     results.append(_check("since_restart: baking_seconds == 30min (01:30 -> 02:00, unaffected once past the boundary)",
                           m["baking_seconds"], 30 * 60))
 
@@ -262,8 +264,8 @@ def test_today_restart_boundary() -> list[bool]:
     # No carry-over exists before local midnight here, so the walk starts
     # at the pre-restart 00:20 row instead of sliding to 01:00.
     m_full = _machine(stats.compute_daily_summary(today, boundary_mode="full_day"))
-    results.append(_check("full_day: ready_seconds == 1h10m (00:20 pre-restart row -> 01:30, restart boundary ignored)",
-                          m_full["ready_seconds"], 70 * 60))
+    results.append(_check("full_day: waiting_seconds == 1h10m (00:20 pre-restart row -> 01:30, restart boundary ignored)",
+                          m_full["waiting_seconds"], 70 * 60))
     results.append(_check("full_day: baking_seconds == 30min (unaffected either way)",
                           m_full["baking_seconds"], 30 * 60))
 
@@ -273,13 +275,13 @@ def test_today_restart_boundary() -> list[bool]:
     _fresh_db()
     day2_start = history.local_day_start_utc(DAY2)
     with sqlite3.connect(history.DB_PATH) as conn:
-        _insert(conn, timestamp=_ts(day2_start, minutes=-10), old_state="COLD", new_state="READY")
-        _insert(conn, timestamp=_ts(day2_start, hours=8), old_state="READY", new_state="BAKING")
+        _insert(conn, timestamp=_ts(day2_start, minutes=-10), old_state="COLD", new_state="WAITING")
+        _insert(conn, timestamp=_ts(day2_start, hours=8), old_state="WAITING", new_state="BAKING")
         conn.commit()
     history.set_server_started_at(_ts(day2_start, hours=12))
     m2 = _machine(stats.compute_daily_summary(DAY2, boundary_mode="since_restart"))
-    results.append(_check("past date ready_seconds == 8h (restart boundary ignored for non-today dates)",
-                          m2["ready_seconds"], 8 * 3600))
+    results.append(_check("past date waiting_seconds == 8h (restart boundary ignored for non-today dates)",
+                          m2["waiting_seconds"], 8 * 3600))
     results.append(_check("past date baking_seconds == 16h (restart boundary ignored for non-today dates)",
                           m2["baking_seconds"], 16 * 3600))
     return results
@@ -293,10 +295,10 @@ def test_error_count() -> list[bool]:
     start = history.local_day_start_utc(DAY2)
 
     with sqlite3.connect(history.DB_PATH) as conn:
-        _insert(conn, timestamp=_ts(start, hours=1), old_state="COLD", new_state="READY")
-        _insert(conn, timestamp=_ts(start, hours=2), old_state="READY", new_state="ERROR")
-        _insert(conn, timestamp=_ts(start, hours=3), old_state="ERROR", new_state="READY")
-        _insert(conn, timestamp=_ts(start, hours=4), old_state="READY", new_state="ERROR")
+        _insert(conn, timestamp=_ts(start, hours=1), old_state="COLD", new_state="WAITING")
+        _insert(conn, timestamp=_ts(start, hours=2), old_state="WAITING", new_state="ERROR")
+        _insert(conn, timestamp=_ts(start, hours=3), old_state="ERROR", new_state="WAITING")
+        _insert(conn, timestamp=_ts(start, hours=4), old_state="WAITING", new_state="ERROR")
         _insert(conn, timestamp=_ts(start, hours=5), old_state="ERROR", new_state="BAKING")
         conn.commit()
 
@@ -308,8 +310,8 @@ def test_error_count() -> list[bool]:
     _fresh_db()
     day2_start = history.local_day_start_utc(DAY2)
     with sqlite3.connect(history.DB_PATH) as conn:
-        _insert(conn, timestamp=_ts(day2_start, hours=-5), old_state="READY", new_state="ERROR")
-        _insert(conn, timestamp=_ts(day2_start, hours=8), old_state="ERROR", new_state="READY")
+        _insert(conn, timestamp=_ts(day2_start, hours=-5), old_state="WAITING", new_state="ERROR")
+        _insert(conn, timestamp=_ts(day2_start, hours=8), old_state="ERROR", new_state="WAITING")
         conn.commit()
     m2 = _machine(stats.compute_daily_summary(DAY2))
     results.append(_check("error_count == 0 (carried-over ERROR anchor isn't a within-day transition)",
@@ -323,10 +325,10 @@ def test_compute_totals() -> list[bool]:
     results = []
 
     machines = [
-        {"baking_seconds": 3600, "ready_seconds": 3600, "heating_seconds": 0, "error_seconds": 0,
-         "cold_seconds": 0, "offline_seconds": 0, "error_count": 1},
-        {"baking_seconds": 1800, "ready_seconds": 0, "heating_seconds": 1800, "error_seconds": 3600,
-         "cold_seconds": 0, "offline_seconds": 0, "error_count": 2},
+        {"baking_seconds": 3600, "waiting_seconds": 3600, "heating_seconds": 0, "hot_seconds": 0,
+         "blocked_seconds": 0, "error_seconds": 0, "cold_seconds": 0, "offline_seconds": 0, "error_count": 1},
+        {"baking_seconds": 1800, "waiting_seconds": 0, "heating_seconds": 1800, "hot_seconds": 0,
+         "blocked_seconds": 0, "error_seconds": 3600, "cold_seconds": 0, "offline_seconds": 0, "error_count": 2},
     ]
     totals = stats.compute_totals(machines)
     results.append(_check("baking_seconds == 5400 (summed across machines)", totals["baking_seconds"], 5400))
@@ -358,14 +360,14 @@ def test_compute_seven_day_average() -> list[bool]:
         _insert(conn, timestamp=_ts(day0_start, hours=1), old_state="COLD", new_state="ERROR")
         _insert(conn, timestamp=_ts(day0_start, hours=1, minutes=30), old_state="ERROR", new_state="BAKING")
         _insert(conn, timestamp=_ts(day0_start, hours=5, minutes=30), old_state="BAKING", new_state="ERROR")
-        _insert(conn, timestamp=_ts(day0_start, hours=6), old_state="ERROR", new_state="READY")
+        _insert(conn, timestamp=_ts(day0_start, hours=6), old_state="ERROR", new_state="WAITING")
         # DAY1: baked for 2h, no errors.
         _insert(conn, timestamp=_ts(day1_start, hours=1), old_state="COLD", new_state="BAKING")
-        _insert(conn, timestamp=_ts(day1_start, hours=3), old_state="BAKING", new_state="READY")
+        _insert(conn, timestamp=_ts(day1_start, hours=3), old_state="BAKING", new_state="WAITING")
         # DAY2 (current date): baked for 1h, one error.
         _insert(conn, timestamp=_ts(day2_start, hours=1), old_state="COLD", new_state="BAKING")
         _insert(conn, timestamp=_ts(day2_start, hours=2), old_state="BAKING", new_state="ERROR")
-        _insert(conn, timestamp=_ts(day2_start, hours=2, minutes=30), old_state="ERROR", new_state="READY")
+        _insert(conn, timestamp=_ts(day2_start, hours=2, minutes=30), old_state="ERROR", new_state="WAITING")
         conn.commit()
 
     day2_summary = stats.with_all_configured_machines(stats.compute_daily_summary(DAY2, boundary_mode="full_day"))
@@ -409,26 +411,26 @@ def test_compute_timeline() -> list[bool]:
     day_end = start + timedelta(days=1)
 
     with sqlite3.connect(history.DB_PATH) as conn:
-        # READY carried in from before DAY2 (no row on DAY2 itself for the
+        # WAITING carried in from before DAY2 (no row on DAY2 itself for the
         # first stretch) -> COLD at 08:00 -> server downtime with no
         # SERVER_STOPPED row (hard kill) -> UNKNOWN marker at 12:00 ->
-        # READY again at 12:05, open for the rest of the day.
-        _insert(conn, timestamp=_ts(start, hours=-2), old_state="COLD", new_state="READY")
-        _insert(conn, timestamp=_ts(start, hours=8), old_state="READY", new_state="COLD")
+        # WAITING again at 12:05, open for the rest of the day.
+        _insert(conn, timestamp=_ts(start, hours=-2), old_state="COLD", new_state="WAITING")
+        _insert(conn, timestamp=_ts(start, hours=8), old_state="WAITING", new_state="COLD")
         _insert(conn, timestamp=_ts(start, hours=12), old_state="COLD",
                 new_state=history.UNKNOWN_MARKER, was_online=0)
-        _insert(conn, timestamp=_ts(start, hours=12, minutes=5), old_state=None, new_state="READY")
+        _insert(conn, timestamp=_ts(start, hours=12, minutes=5), old_state=None, new_state="WAITING")
         conn.commit()
 
     timeline = stats.compute_timeline(DAY2)
     m = next(x for x in timeline["machines"] if x["plc_ip"] == PLC_IP)
     spans = m["spans"]
 
-    results.append(_check("4 spans (carried READY, poisoned-COLD as NO_DATA, marker as NO_DATA, final READY)",
+    results.append(_check("4 spans (carried WAITING, poisoned-COLD as NO_DATA, marker as NO_DATA, final WAITING)",
                           len(spans), 4))
-    results.append(_check("span 0 is READY, day_start -> 08:00 (carried over, a real trustworthy span)",
+    results.append(_check("span 0 is WAITING, day_start -> 08:00 (carried over, a real trustworthy span)",
                           (spans[0]["state"], spans[0]["start"], spans[0]["end"]),
-                          ("READY", start.strftime("%Y-%m-%dT%H:%M:%SZ"), _ts(start, hours=8))))
+                          ("WAITING", start.strftime("%Y-%m-%dT%H:%M:%SZ"), _ts(start, hours=8))))
     # The 08:00 COLD row's OWN new_state is a real state, but its next row
     # is the UNKNOWN marker with no SERVER_STOPPED row ever written (hard
     # kill) — so per the poisoned-by-unknown rule (see module docstring)
@@ -439,9 +441,87 @@ def test_compute_timeline() -> list[bool]:
     results.append(_check("span 2 is NO_DATA (the UNKNOWN marker's own brief span)",
                           (spans[2]["state"], spans[2]["start"], spans[2]["end"], spans[2]["is_online"]),
                           ("NO_DATA", _ts(start, hours=12), _ts(start, hours=12, minutes=5), False)))
-    results.append(_check("span 3 is READY, 12:05 -> day_end (DAY2 isn't today, so it caps at midnight, not 'now')",
+    results.append(_check("span 3 is WAITING, 12:05 -> day_end (DAY2 isn't today, so it caps at midnight, not 'now')",
                           (spans[3]["state"], spans[3]["start"], spans[3]["end"]),
-                          ("READY", _ts(start, hours=12, minutes=5), day_end.strftime("%Y-%m-%dT%H:%M:%SZ"))))
+                          ("WAITING", _ts(start, hours=12, minutes=5), day_end.strftime("%Y-%m-%dT%H:%M:%SZ"))))
+    return results
+
+
+def test_hot_and_blocked() -> list[bool]:
+    print()
+    print("--- Hot / Blocked durations (state mapping v2) ---")
+    _fresh_db()
+    results = []
+    start = history.local_day_start_utc(DAY2)
+
+    with sqlite3.connect(history.DB_PATH) as conn:
+        _insert(conn, timestamp=_ts(start, hours=6), old_state=None, new_state="COLD")
+        _insert(conn, timestamp=_ts(start, hours=7), old_state="COLD", new_state="HOT")
+        _insert(conn, timestamp=_ts(start, hours=9), old_state="HOT", new_state="BLOCKED")
+        _insert(conn, timestamp=_ts(start, hours=12), old_state="BLOCKED", new_state="BAKING")
+        _insert(conn, timestamp=_ts(start, hours=18), old_state="BAKING", new_state="COLD")
+        conn.commit()
+
+    m = _machine(stats.compute_daily_summary(DAY2))
+    results.append(_check("hot_seconds == 2h (07:00 -> 09:00)", m["hot_seconds"], 2 * 3600))
+    results.append(_check("blocked_seconds == 3h (09:00 -> 12:00)", m["blocked_seconds"], 3 * 3600))
+    # Hot and Blocked count as observed time like Cold/Heating:
+    # 6h baking over 06:00 -> 24:00 = 18h observed.
+    results.append(_check("productivity_pct == 33.3 (Hot/Blocked in the denominator)",
+                          m["productivity_pct"], 33.3))
+    results.append(_check("productivity_pct() is the shared formula",
+                          stats.productivity_pct(6 * 3600, 18 * 3600), 33.3))
+    return results
+
+
+def _legacy_db_with_rows(rows: list[tuple[str | None, str]]) -> None:
+    """A throwaway DB as written BEFORE state mapping v2: tables exist,
+    rows use the old READY name, no state_mapping_version flag yet."""
+    _fresh_db()
+    with sqlite3.connect(history.DB_PATH) as conn:
+        conn.execute("DELETE FROM app_settings WHERE key = 'state_mapping_version'")
+        for i, (old_state, new_state) in enumerate(rows):
+            _insert(conn, timestamp=_ts(datetime(2026, 9, 1), minutes=i), old_state=old_state, new_state=new_state)
+        conn.commit()
+
+
+def _states_in_db() -> list[tuple]:
+    with sqlite3.connect(history.DB_PATH) as conn:
+        return conn.execute("SELECT old_state, new_state FROM state_transitions ORDER BY id").fetchall()
+
+
+def test_state_mapping_migration() -> list[bool]:
+    print()
+    print("--- history migration to state mapping v2 (READY -> WAITING) ---")
+    results = []
+    legacy = [(None, "COLD"), ("COLD", "HEATING"), ("HEATING", "READY"), ("READY", "BAKING"),
+              ("BAKING", "READY"), ("READY", "ERROR"), ("ERROR", history.UNKNOWN_MARKER)]
+    _legacy_db_with_rows(legacy)
+
+    changed = history.migrate_state_mapping()
+    results.append(_check("4 rows changed (any row with READY in old_state or new_state)", changed, 4))
+    results.append(_check("READY renamed to WAITING in both columns, everything else untouched",
+                          _states_in_db(),
+                          [(None, "COLD"), ("COLD", "HEATING"), ("HEATING", "WAITING"), ("WAITING", "BAKING"),
+                           ("BAKING", "WAITING"), ("WAITING", "ERROR"), ("ERROR", history.UNKNOWN_MARKER)]))
+    backup = history.DB_PATH.with_name(history.DB_PATH.name + ".bak-before-state-v2")
+    results.append(_check("backup written before migrating", backup.exists(), True))
+    with sqlite3.connect(backup) as conn:
+        backed_up = conn.execute("SELECT old_state, new_state FROM state_transitions ORDER BY id").fetchall()
+    results.append(_check("backup holds the original (pre-migration) rows", backed_up, legacy))
+
+    # Runs once: a second call (and a re-init, which calls it too) is a no-op,
+    # even if a stray READY row shows up afterwards.
+    with sqlite3.connect(history.DB_PATH) as conn:
+        _insert(conn, timestamp="2026-09-02T00:00:00Z", old_state=None, new_state="READY")
+        conn.commit()
+    results.append(_check("second run returns None (flag set)", history.migrate_state_mapping(), None))
+    history.init_db()
+    results.append(_check("init_db() doesn't re-run it", _states_in_db()[-1], (None, "READY")))
+
+    _fresh_db()
+    results.append(_check("fresh install: nothing to migrate, flag already set",
+                          history.migrate_state_mapping(), None))
     return results
 
 
@@ -457,6 +537,8 @@ def main() -> bool:
         test_compute_totals,
         test_compute_seven_day_average,
         test_compute_timeline,
+        test_hot_and_blocked,
+        test_state_mapping_migration,
     ):
         results.extend(scenario())
 

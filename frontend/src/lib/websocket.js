@@ -12,6 +12,8 @@ function applyState(data) {
     connected: data.connected,
     timestamp: data.timestamp,
     groups: data.groups,
+    // The backend's Next Action pick (priority.select_next_action) — see nextAction.js.
+    next_action: data.next_action,
   });
 }
 

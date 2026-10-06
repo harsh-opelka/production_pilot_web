@@ -31,10 +31,18 @@ from .plc_config import load_config
 
 #: Fixed recipe choices offered by the Demo Controls panel (see
 #: server.py's DemoSetStateIn / /api/service/demo/set-state, which
-#: validates against this same list). Real PLCs have no recipe data yet
-#: (see models.PlcData.recipe's docstring) — this only ever populates the
-#: field while data_source_mode is "demo".
+#: validates against this same list). Real PLCs report their own recipe
+#: (see opcua_source.py) — this only ever populates PlcData.recipe_name
+#: while data_source_mode is "demo".
 RECIPE_OPTIONS = ("Quarkballs", "Berliners", "Donuts", "Apfelschnenken")
+
+# Demo-only oil temperatures (°C) — invented here so the tile's
+# "current / target" line has something to show in Demo Mode. Never used
+# by OpcUaSource; real mode shows only what the PLC reports.
+_DEMO_TARGET_TEMP = 180.0
+_DEMO_COLD_TEMP = 22.0
+_DEMO_HEAT_RATE = 3.0   # °C per second while HEATING
+_DEMO_COOL_RATE = 0.5   # °C per second while COLD
 
 _DEFAULT_GROUP_NAME = "Demo Station"
 _DEFAULT_GROUP_TYPE = "QUATTRO"
@@ -51,10 +59,12 @@ def _default_plc(index: int, ip: str, unit_number: int | None = None) -> PlcData
     return PlcData(
         ip=ip,
         name=f"PLC {index + 1}",
-        state=MachineState.READY,
+        state=MachineState.WAITING,
         is_online=True,
         default_priority=index,
         unit_number=unit_number if unit_number is not None else index + 1,
+        oil_temp_current=_DEMO_TARGET_TEMP,
+        oil_temp_target=_DEMO_TARGET_TEMP,
     )
 
 
@@ -135,7 +145,7 @@ class SimulatedSource:
         wall-clock time elapsed since the last call (never a fixed 0.5s
         assumption — polling isn't perfectly metronomic), floored at 0.
         Reaching 0 (including via a tester manually setting it to 0 from
-        the demo panel) auto-advances the PLC straight to READY — a real
+        the demo panel) auto-advances the PLC straight to WAITING — a real
         PLC's own state naturally moves on once the bake finishes, so a
         simulated one shouldn't sit frozen at "Almost finished" forever
         either. Caller holds _lock."""
@@ -147,6 +157,7 @@ class SimulatedSource:
 
         for group in self._groups:
             for plc in group.plcs:
+                self._tick_temperature(plc, elapsed)
                 if plc.state != MachineState.BAKING or plc.remaining_seconds is None:
                     continue
                 whole, fraction = divmod(self._carry.get(plc.ip, 0.0) + elapsed, 1.0)
@@ -154,9 +165,25 @@ class SimulatedSource:
                 if whole:
                     plc.remaining_seconds = max(0, plc.remaining_seconds - int(whole))
                 if plc.remaining_seconds == 0:
-                    plc.state = MachineState.READY
+                    plc.state = MachineState.WAITING
                     plc.remaining_seconds = None
                     self._carry.pop(plc.ip, None)
+
+    @staticmethod
+    def _tick_temperature(plc: PlcData, elapsed: float) -> None:
+        """Demo-only oil temperature: cools towards room temperature while
+        COLD (0.5 °C/s, so a Cold-reported machine visibly goes from Hot to
+        Cold across the threshold — see hot_cold.py), climbs to the target
+        while HEATING, and otherwise holds its value — so a temperature set
+        from Demo Controls sticks instead of snapping back."""
+        current = plc.oil_temp_current if plc.oil_temp_current is not None else _DEMO_COLD_TEMP
+        target = _DEMO_TARGET_TEMP
+        if plc.state == MachineState.COLD:
+            current = max(_DEMO_COLD_TEMP, current - _DEMO_COOL_RATE * elapsed)
+        elif plc.state == MachineState.HEATING:
+            current = min(target, current + _DEMO_HEAT_RATE * elapsed)
+        plc.oil_temp_current = round(current, 1)
+        plc.oil_temp_target = target
 
     def _find(self, group_name: str, ip: str) -> PlcData | None:
         for group in self._groups:
@@ -176,6 +203,7 @@ class SimulatedSource:
         is_online: bool | None = None,
         remaining_seconds: int | None = None,
         recipe: str | None = None,
+        oil_temp_current: float | None = None,
     ) -> None:
         """Updates only the fields passed (None = leave unchanged) on the
         given PLC. Raises KeyError if group_name/ip doesn't match any
@@ -185,7 +213,7 @@ class SimulatedSource:
         (the demo panel's recipe dropdown has a blank "None" option) —
         None still means "not provided" like every other parameter here,
         but an empty string means "clear it", so it round-trips to
-        PlcData.recipe's own None-means-unset convention rather than
+        PlcData.recipe_name's own None-means-unset convention rather than
         getting stuck on a stale recipe name forever."""
         with self._lock:
             plc = self._find(group_name, ip)
@@ -203,4 +231,6 @@ class SimulatedSource:
                 # next tick (see _tick).
                 self._carry.pop(ip, None)
             if recipe is not None:
-                plc.recipe = recipe or None
+                plc.recipe_name = recipe or None
+            if oil_temp_current is not None:
+                plc.oil_temp_current = float(oil_temp_current)

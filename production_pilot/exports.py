@@ -25,14 +25,19 @@ from openpyxl.utils import get_column_letter
 from fpdf import FPDF
 from fpdf.fonts import FontFace
 
-#: (header, machine-dict key) for every duration column, in table order.
+#: (header, machine-dict key) for every duration column, in table order —
+#: split around the "Error Count" column, which sits right after Error.
 #: untracked_seconds = UNKNOWN/SERVER_STOPPED marker spans, i.e. genuine
 #: server-downtime gaps, not machine time (see stats.py module docstring).
-_DURATION_COLUMNS = [
+_DURATION_COLUMNS_BEFORE_COUNT = [
     ("Baking", "baking_seconds"),
-    ("Ready", "ready_seconds"),
+    ("Waiting", "waiting_seconds"),
     ("Heating", "heating_seconds"),
+    ("Hot", "hot_seconds"),
+    ("Blocked", "blocked_seconds"),
     ("Error", "error_seconds"),
+]
+_DURATION_COLUMNS_AFTER_COUNT = [
     ("Cold", "cold_seconds"),
     ("Offline", "offline_seconds"),
     ("No data (server offline)", "untracked_seconds"),
@@ -41,9 +46,9 @@ _DURATION_COLUMNS = [
 HEADERS = [
     "Machine Group",
     "Unit",
-    *[header for header, _ in _DURATION_COLUMNS[:4]],
+    *[header for header, _ in _DURATION_COLUMNS_BEFORE_COUNT],
     "Error Count",
-    *[header for header, _ in _DURATION_COLUMNS[4:]],
+    *[header for header, _ in _DURATION_COLUMNS_AFTER_COUNT],
     "Productivity (%)",
 ]
 
@@ -55,13 +60,12 @@ def format_hm(seconds: float | int | None) -> str:
 
 
 def _row(m: dict) -> list:
-    durations = [format_hm(m[key]) for _, key in _DURATION_COLUMNS]
     return [
         m["group_name"],
         m["unit_number"],
-        *durations[:4],
+        *[format_hm(m[key]) for _, key in _DURATION_COLUMNS_BEFORE_COUNT],
         m["error_count"],
-        *durations[4:],
+        *[format_hm(m[key]) for _, key in _DURATION_COLUMNS_AFTER_COUNT],
         f"{m['productivity_pct']:.1f}%",
     ]
 
@@ -185,7 +189,8 @@ def to_pdf(summary: dict, totals: dict, target_pct: int | None, comparison: dict
     pdf.set_font("Helvetica", "", 8)
     pdf.set_draw_color(203, 213, 225)
     pdf.set_fill_color(255, 255, 255)  # the KPI boxes left it navy
-    col_widths = (34, 12, 20, 20, 20, 20, 16, 20, 20, 30, 22)
+    # Group, Unit, 6 durations, Error Count, Cold, Offline, No data, Productivity
+    col_widths = (32, 11, 18, 18, 18, 16, 18, 18, 16, 18, 18, 30, 22)
     with pdf.table(
         col_widths=col_widths,
         text_align=("LEFT", "CENTER", *(["RIGHT"] * (len(HEADERS) - 2))),

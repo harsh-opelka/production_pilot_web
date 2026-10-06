@@ -19,22 +19,24 @@ const en = {
   // Small label on top of the two-tier Next Action box (see TopBar.svelte);
   // the larger text below it is built from the next_action_* keys below.
   next_action_prefix: 'Next Action',
+  // One key per backend Next Action kind (priority.select_next_action,
+  // mapped in nextAction.js): Error, then Waiting (empty -> load it), then
+  // Hot (not in auto mode -> switch it), then Almost finished (unload soon).
   next_action_error: '{unit}: Check Error',
-  // A Ready machine is empty and needs loading now; an Almost Finished
-  // (near-completion BAKING) one is about to finish and needs UNLOADING
-  // soon — only shown when nothing is in Error or Ready (see nextAction.js).
-  next_action_load: '{unit}: Load',
+  next_action_load: '{unit}: Load Machine',
+  next_action_switch_to_auto: '{unit}: Switch to Auto',
   next_action_near_completion: '{unit}: Unload Soon',
+  // Screen-reader text for the smiley shown when every online machine is baking.
+  next_action_all_baking: 'All machines baking',
   no_action: '–',
   // Small corner badge on the one MachineTile matching the Next Action
   // banner (see FryerTile.svelte's isNext prop).
   tile_next_badge: 'Next',
   state_cold: 'Cold',
   state_heating: 'Heating',
-  // Display label only — the underlying MachineState stays READY (colour,
-  // priority logic, next-action wording all untouched). Renamed per spec
-  // so the per-machine label matches kpi_waiting's existing wording below.
-  state_ready: 'Waiting',
+  state_hot: 'Hot',
+  state_waiting: 'Waiting',
+  state_blocked: 'Blocked',
   state_baking: 'Baking',
   state_error: 'Error',
   state_near_completion: 'Almost finished',
@@ -66,6 +68,7 @@ const en = {
   list_col_status: 'Status',
   list_col_time: 'Time',
   list_col_recipe: 'Recipe',
+  list_col_temperature: 'Temp. (actual / target)',
   list_col_productivity: 'Productivity',
 
   stats_date_label: 'Date',
@@ -80,8 +83,10 @@ const en = {
   stats_no_data: 'No data recorded for this date',
   stats_col_unit: 'Unit',
   stats_col_baking: 'Baking',
-  stats_col_ready: 'Ready',
+  stats_col_waiting: 'Waiting',
   stats_col_heating: 'Heating',
+  stats_col_hot: 'Hot',
+  stats_col_blocked: 'Blocked',
   stats_col_error: 'Error',
   stats_col_error_count: 'Errors',
   stats_col_cold: 'Cold',
@@ -210,7 +215,33 @@ const en = {
   service_demo_recipe_none: '–',
   service_demo_online_col: 'Online',
   service_demo_remaining_col: 'Remaining (s)',
+  service_demo_temp_col: 'Oil temp (°C)',
   service_demo_error: 'Could not update simulated state: {error}',
+
+  service_layout_heading: 'Floor layout',
+  service_layout_desc:
+    'Drag the machine groups (and TVs) to where they stand on the floor. The dashboard tile view shows them the same way. Preview of a 1080p TV, blocks at their real size.',
+  service_layout_overlap: '{a} and {b} overlap at their real size.',
+  service_layout_too_big: '{group} is bigger than the screen at its real size — try the other orientation.',
+  service_layout_add_tv: 'Add TV',
+  service_layout_remove_tv: 'Remove TV',
+  service_layout_tv: 'TV',
+  service_layout_horizontal: 'Row',
+  service_layout_vertical: 'Column',
+  service_layout_orientation: 'Orientation of {group}',
+  service_layout_reset: 'Reset to default',
+  service_layout_saved: 'Layout saved.',
+  service_layout_reset_done: 'Layout reset — the dashboard uses the stacked layout again.',
+  service_layout_unsaved: 'Unsaved changes',
+  service_layout_not_placed: 'not placed yet',
+  service_layout_no_groups: 'No machine groups configured yet.',
+  service_layout_error: 'Could not save layout: {error}',
+
+  service_hot_cold_heading: 'Hot / Cold temperature threshold (°C)',
+  service_hot_cold_help: 'Machines at or above this oil temperature are shown as Hot, below as Cold.',
+  service_hot_cold_label: 'Threshold (°C)',
+  service_hot_cold_invalid: 'Enter a number between 20 and 150.',
+  service_hot_cold_saved: 'Threshold saved — applies from the next update.',
 
   service_productivity_target_heading: 'Productivity Target',
   service_productivity_target_label: 'Target (%)',
@@ -243,10 +274,13 @@ const de = {
   next_action_prefix: 'Nächste Aktion',
   next_action_error: '{unit}: Störung prüfen',
   next_action_load: '{unit}: Beladen',
+  next_action_switch_to_auto: '{unit}: Auf Auto stellen',
   next_action_near_completion: '{unit}: Bald entladen',
+  next_action_all_baking: 'Alle Maschinen backen',
   tile_next_badge: 'Nächste',
-  // Overrides de_v1's "Bereit" — same reasoning as the en export above.
-  state_ready: 'Warte',
+  state_hot: 'Heiß',
+  state_waiting: 'Warte',
+  state_blocked: 'Blockiert',
   state_near_completion: 'Fast fertig',
   theme_dark: 'Dunkel',
   theme_light: 'Hell',
@@ -264,6 +298,7 @@ const de = {
   list_col_status: 'Status',
   list_col_time: 'Zeit',
   list_col_recipe: 'Rezept',
+  list_col_temperature: 'Temp. (Ist / Soll)',
   list_col_productivity: 'Produktivität',
 
   stats_date_label: 'Datum',
@@ -278,8 +313,10 @@ const de = {
   stats_no_data: 'Keine Daten für dieses Datum erfasst',
   stats_col_unit: 'Einheit',
   stats_col_baking: 'Backen',
-  stats_col_ready: 'Bereit',
+  stats_col_waiting: 'Warte',
   stats_col_heating: 'Aufheizen',
+  stats_col_hot: 'Heiß',
+  stats_col_blocked: 'Blockiert',
   stats_col_error: 'Fehler',
   stats_col_error_count: 'Fehler (Anzahl)',
   stats_col_cold: 'Kalt',
@@ -375,7 +412,33 @@ const de = {
   service_demo_recipe_none: '–',
   service_demo_online_col: 'Online',
   service_demo_remaining_col: 'Restzeit (s)',
+  service_demo_temp_col: 'Öltemp. (°C)',
   service_demo_error: 'Simulierter Status konnte nicht aktualisiert werden: {error}',
+
+  service_layout_heading: 'Hallenlayout',
+  service_layout_desc:
+    'Ziehen Sie die Maschinengruppen (und Fernseher) dorthin, wo sie in der Halle stehen. Die Blockansicht des Dashboards zeigt sie genauso. Vorschau eines 1080p-Fernsehers, Blöcke in echter Größe.',
+  service_layout_overlap: '{a} und {b} überlappen sich in echter Größe.',
+  service_layout_too_big: '{group} ist in echter Größe größer als der Bildschirm — andere Ausrichtung versuchen.',
+  service_layout_add_tv: 'Fernseher hinzufügen',
+  service_layout_remove_tv: 'Fernseher entfernen',
+  service_layout_tv: 'TV',
+  service_layout_horizontal: 'Reihe',
+  service_layout_vertical: 'Spalte',
+  service_layout_orientation: 'Ausrichtung von {group}',
+  service_layout_reset: 'Auf Standard zurücksetzen',
+  service_layout_saved: 'Layout gespeichert.',
+  service_layout_reset_done: 'Layout zurückgesetzt — das Dashboard zeigt wieder die gestapelte Ansicht.',
+  service_layout_unsaved: 'Ungespeicherte Änderungen',
+  service_layout_not_placed: 'noch nicht platziert',
+  service_layout_no_groups: 'Noch keine Maschinengruppen konfiguriert.',
+  service_layout_error: 'Layout konnte nicht gespeichert werden: {error}',
+
+  service_hot_cold_heading: 'Heiß-/Kalt-Temperaturschwelle (°C)',
+  service_hot_cold_help: 'Maschinen ab dieser Öltemperatur werden als Heiß angezeigt, darunter als Kalt.',
+  service_hot_cold_label: 'Schwelle (°C)',
+  service_hot_cold_invalid: 'Geben Sie eine Zahl zwischen 20 und 150 ein.',
+  service_hot_cold_saved: 'Schwelle gespeichert — gilt ab der nächsten Aktualisierung.',
 
   service_productivity_target_heading: 'Produktivitätsziel',
   service_productivity_target_label: 'Ziel (%)',

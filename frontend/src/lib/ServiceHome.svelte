@@ -5,8 +5,10 @@
   import ChangeManagementPasswordCard from './ChangeManagementPasswordCard.svelte';
   import RecordingCard from './RecordingCard.svelte';
   import ProductivityTargetCard from './ProductivityTargetCard.svelte';
+  import HotColdThresholdCard from './HotColdThresholdCard.svelte';
   import DataSourceCard from './DataSourceCard.svelte';
   import InstallWizard from './InstallWizard.svelte';
+  import FloorLayoutEditor from './FloorLayoutEditor.svelte';
 
   let wizardOpen = $state(false);
 </script>
@@ -25,6 +27,10 @@
       <div class="card">
         <DataSourceCard />
       </div>
+    </div>
+
+    <div class="card full-width">
+      <FloorLayoutEditor />
     </div>
   </section>
 
@@ -50,6 +56,10 @@
 
       <div class="card">
         <ProductivityTargetCard />
+      </div>
+
+      <div class="card">
+        <HotColdThresholdCard />
       </div>
     </div>
   </section>
@@ -115,6 +125,11 @@
        caused the reported overflow, not the grid/card sizing itself. */
     min-width: 0;
     overflow-wrap: break-word;
+  }
+
+  /* Floor layout editor — needs the whole row for a usable canvas. */
+  .card.full-width {
+    margin-top: clamp(1rem, 2vw, 2rem);
   }
 
   .wizard-card {

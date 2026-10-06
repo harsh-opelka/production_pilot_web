@@ -26,6 +26,20 @@
     return `${d.getFullYear()}-${mm}-${dd}`;
   }
 
+  // Every observed-time bucket from stats._SECONDS_KEYS — the productivity
+  // denominator (Hot and Blocked count as available time for now, same as
+  // the backend's shared stats.productivity_pct).
+  const TRACKED_KEYS = [
+    'baking_seconds',
+    'waiting_seconds',
+    'heating_seconds',
+    'hot_seconds',
+    'blocked_seconds',
+    'error_seconds',
+    'cold_seconds',
+    'offline_seconds',
+  ];
+
   let selectedDate = $state(todayLocalDate());
   let availableDates = $state([]);
   let machines = $state([]);
@@ -194,8 +208,7 @@
   let machinesWithData = $derived(
     machines.filter(
       (m) =>
-        m.baking_seconds + m.ready_seconds + m.heating_seconds + m.error_seconds + m.cold_seconds + m.offline_seconds >
-        0,
+        TRACKED_KEYS.reduce((sum, k) => sum + m[k], 0) > 0,
     ),
   );
 
@@ -318,7 +331,7 @@
   }
 
   let bakingSeries = $derived(buildSeries('baking_seconds', $lang));
-  let waitingSeries = $derived(buildSeries('ready_seconds', $lang));
+  let waitingSeries = $derived(buildSeries('waiting_seconds', $lang));
   let errorSeries = $derived(buildSeries('error_seconds', $lang));
   let productivitySeries = $derived(buildSeries('productivity_pct', $lang));
 
@@ -327,7 +340,6 @@
   // with no recorded machines is null (a gap), not 0 — same rule as
   // buildSeries. Productivity is weighted (total baking over total
   // tracked time), matching stats.compute_totals, not a per-machine mean.
-  const TRACKED_KEYS = ['baking_seconds', 'ready_seconds', 'heating_seconds', 'error_seconds', 'cold_seconds', 'offline_seconds'];
   let lastWeekDays = $derived(rangeDays.slice(-7));
   let productivitySpark = $derived(
     lastWeekDays.map((day) => {
@@ -352,8 +364,10 @@
     { key: 'unit_number', labelKey: 'stats_col_unit', kind: 'unit', locked: true },
     { key: 'plc_ip', labelKey: 'stats_col_ip', kind: 'text', serviceOnly: true },
     { key: 'baking_seconds', labelKey: 'stats_col_baking', kind: 'duration' },
-    { key: 'ready_seconds', labelKey: 'stats_col_ready', kind: 'duration' },
+    { key: 'waiting_seconds', labelKey: 'stats_col_waiting', kind: 'duration' },
     { key: 'heating_seconds', labelKey: 'stats_col_heating', kind: 'duration' },
+    { key: 'hot_seconds', labelKey: 'stats_col_hot', kind: 'duration' },
+    { key: 'blocked_seconds', labelKey: 'stats_col_blocked', kind: 'duration' },
     { key: 'error_seconds', labelKey: 'stats_col_error', kind: 'duration' },
     { key: 'error_count', labelKey: 'stats_col_error_count', kind: 'count' },
     { key: 'cold_seconds', labelKey: 'stats_col_cold', kind: 'duration' },

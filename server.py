@@ -30,11 +30,11 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from production_pilot import exports, history, plc_config, scan_plcs, service_config, stats
+from production_pilot import exports, history, hot_cold, layout, plc_config, scan_plcs, service_config, stats
 from production_pilot.demo_source import RECIPE_OPTIONS, SimulatedSource
 from production_pilot.models import MachineGroup, MachineState
 from production_pilot.opcua_source import CONFIG_PATH, OpcUaSource
@@ -51,7 +51,12 @@ LOGIN_RATE_LIMIT_WINDOW_SECONDS = 5 * 60
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
-_EMPTY_STATE = {"connected": False, "timestamp": None, "groups": []}
+_EMPTY_STATE = {
+    "connected": False,
+    "timestamp": None,
+    "groups": [],
+    "next_action": {"kind": "none", "ip": None, "unit_number": None},
+}
 
 
 def _now_iso() -> str:
@@ -162,7 +167,7 @@ def _hydrate_state_entered_at(server_started_at: str) -> None:
 
     (b) is what stops a restart from presenting server downtime as
     machine time: a server off overnight used to come back showing
-    "Ready 21:23:00" on every tile, because the last transition on
+    "Waiting 21:23:00" on every tile, because the last transition on
     record was from before the outage. What the timer can honestly
     claim is how long we've actually been observing the state, which
     after a restart is "since we came back up". A PLC with no history at
@@ -255,6 +260,20 @@ def _detect_and_log_transitions(groups: list[MachineGroup]) -> None:
             plc.state_entered_at = _state_entered_at.get(plc.ip)
 
 
+# Hot vs Cold from the oil temperature — applied to every poll HERE, before
+# transition detection, so history and everything downstream share one
+# derived state (see production_pilot/hot_cold.py). Poll thread only.
+_hot_cold_rule = hot_cold.HotColdRule()
+
+
+def _process_poll(groups: list[MachineGroup]) -> list[MachineGroup]:
+    """One poll's raw source groups -> the derived groups everything else
+    sees: Hot/Cold rule first, then transition detection/history logging."""
+    groups = _hot_cold_rule.apply(groups, history.get_hot_cold_threshold_c())
+    _detect_and_log_transitions(groups)
+    return groups
+
+
 def _poll_loop() -> None:
     """
     Runs forever in a daemon thread, one poll every POLL_INTERVAL_SECONDS
@@ -274,9 +293,8 @@ def _poll_loop() -> None:
             _set_state({**_EMPTY_STATE, "timestamp": _now_iso()})
         else:
             try:
-                groups = source.get_machines()
+                groups = _process_poll(source.get_machines())
                 connected = source.is_connected()
-                _detect_and_log_transitions(groups)
                 _set_state(build_state(groups, connected))
             except Exception as exc:
                 print(f"[poll] cycle failed: {exc}")
@@ -525,12 +543,19 @@ class ProductivityTargetIn(BaseModel):
     target_pct: int
 
 
+class HotColdThresholdIn(BaseModel):
+    # Any, not float: a missing/non-numeric/bool value must reach
+    # hot_cold.validate_threshold's clear message, not pydantic's 422.
+    threshold_c: Any = None
+
+
 class DemoSetStateIn(BaseModel):
     group_name: str
     ip: str
     state: str | None = None
     is_online: bool | None = None
     remaining_seconds: int | None = None
+    oil_temp_current: float | None = None
     # None = not provided (leave unchanged); "" = explicitly clear it —
     # see SimulatedSource.set_plc_state's docstring.
     recipe: str | None = None
@@ -724,16 +749,65 @@ def _validate_config(machines: list[dict]) -> None:
             raise HTTPException(status_code=400, detail=problem)
 
 
+def _read_machines_or_empty() -> list[dict]:
+    if not CONFIG_PATH.exists():
+        return []
+    try:
+        return plc_config.read_config(CONFIG_PATH).get("machines", [])
+    except (json.JSONDecodeError, OSError, KeyError, TypeError):
+        return []
+
+
 @app.post("/api/service/config")
 def service_save_config(body: ConfigIn, _token: str = Depends(require_level("service"))) -> dict:
     machines = _normalized_machines(body)
     _validate_config(machines)
+    old_machines = _read_machines_or_empty()
     data = {"machines": machines}
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
+    # Renamed groups keep their floor position, deleted ones lose it —
+    # see layout.reconcile_layout.
+    saved_layout = history.get_floor_layout()
+    if saved_layout is not None:
+        history.set_floor_layout(layout.reconcile_layout(saved_layout, old_machines, machines))
     _reload_source()  # picks up the new config without a server restart
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Floor layout — where each machine group (and any TV icons) sits on the
+# dashboard's tile view. Readable by everyone (the anonymous dashboard
+# renders it), editable only at Service level. See production_pilot/layout.py.
+# ---------------------------------------------------------------------------
+
+
+def _known_group_names() -> set[str]:
+    """Group names a layout may refer to: the configured groups, plus the
+    demo source's (it falls back to its own default group when nothing is
+    configured yet — see demo_source.py)."""
+    names = {m["name"] for m in _read_machines_or_empty()}
+    if history.get_data_source_mode() == "demo":
+        names |= {group.name for group in _ensure_demo_source().get_machines()}
+    return names
+
+
+@app.get("/api/layout")
+def get_layout() -> dict:
+    return history.get_floor_layout() or layout.EMPTY_LAYOUT
+
+
+@app.put("/api/layout")
+def put_layout(
+    payload: Any = Body(...), _token: str = Depends(require_level("service"))
+) -> dict:
+    try:
+        normalized = layout.validate_layout(payload, _known_group_names())
+    except layout.LayoutError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    history.set_floor_layout(normalized)
+    return normalized
 
 
 @app.post("/api/service/password")
@@ -877,6 +951,25 @@ def service_set_productivity_target(
     return {"target_pct": body.target_pct}
 
 
+@app.get("/api/service/hot-cold-threshold")
+def service_get_hot_cold_threshold() -> dict:
+    """Readable by every level (no session needed, like /api/layout) —
+    the poll loop itself reads the cached value directly."""
+    return {"threshold_c": history.get_hot_cold_threshold_c()}
+
+
+@app.put("/api/service/hot-cold-threshold")
+def service_set_hot_cold_threshold(
+    body: HotColdThresholdIn, _token: str = Depends(require_level("service"))
+) -> dict:
+    try:
+        threshold_c = hot_cold.validate_threshold(body.threshold_c)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    history.set_hot_cold_threshold_c(threshold_c)  # picked up by the next poll
+    return {"threshold_c": threshold_c}
+
+
 def _demo_state_payload(source: SimulatedSource) -> dict:
     # Original config order (not calculated priority order, see
     # serializers.group_to_dict) — a control panel edits fixed physical
@@ -902,6 +995,8 @@ def service_demo_set_state(body: DemoSetStateIn, _token: str = Depends(require_l
         raise HTTPException(status_code=400, detail=f"Invalid state: {body.state}")
     if body.recipe and body.recipe not in RECIPE_OPTIONS:
         raise HTTPException(status_code=400, detail=f"Invalid recipe: {body.recipe}")
+    if body.oil_temp_current is not None and not -50 <= body.oil_temp_current <= 400:
+        raise HTTPException(status_code=400, detail="Demo oil temperature must be between -50 and 400 °C")
 
     source = _ensure_demo_source()
     try:
@@ -912,6 +1007,7 @@ def service_demo_set_state(body: DemoSetStateIn, _token: str = Depends(require_l
             is_online=body.is_online,
             remaining_seconds=body.remaining_seconds,
             recipe=body.recipe,
+            oil_temp_current=body.oil_temp_current,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))

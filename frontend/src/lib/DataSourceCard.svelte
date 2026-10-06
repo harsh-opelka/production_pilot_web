@@ -16,13 +16,16 @@
     ServiceApiError,
   } from './serviceApi.js';
 
-  const STATES = ['COLD', 'HEATING', 'READY', 'BAKING', 'ERROR'];
+  // Same order as the PLC's integer values 0..6 (models.OPCUA_STATE_MAP).
+  const STATES = ['ERROR', 'COLD', 'HOT', 'HEATING', 'WAITING', 'BLOCKED', 'BAKING'];
   const STATE_KEY = {
-    COLD: 'state_cold',
-    HEATING: 'state_heating',
-    READY: 'state_ready',
-    BAKING: 'state_baking',
     ERROR: 'state_error',
+    COLD: 'state_cold',
+    HOT: 'state_hot',
+    HEATING: 'state_heating',
+    WAITING: 'state_waiting',
+    BLOCKED: 'state_blocked',
+    BAKING: 'state_baking',
   };
 
   // Fixed list for now — mirrors production_pilot/demo_source.py's
@@ -106,6 +109,12 @@
     updatePlc(groupName, ip, { remaining_seconds: seconds });
   }
 
+  function onTempChange(groupName, ip, value) {
+    const celsius = Number(value);
+    if (value === '' || !Number.isFinite(celsius)) return;
+    updatePlc(groupName, ip, { oil_temp_current: celsius });
+  }
+
   function onRecipeChange(groupName, ip, value) {
     // value is '' for the blank/"None" option — set_plc_state treats an
     // explicit empty string as "clear it" (see its docstring), distinct
@@ -152,6 +161,7 @@
             <span>{translate($lang, 'service_demo_recipe_col')}</span>
             <span>{translate($lang, 'service_demo_online_col')}</span>
             <span>{translate($lang, 'service_demo_remaining_col')}</span>
+            <span>{translate($lang, 'service_demo_temp_col')}</span>
           </div>
           {#each group.plcs as plc (plc.ip)}
             <div class="demo-row">
@@ -161,7 +171,7 @@
                   <option value={s}>{translate($lang, STATE_KEY[s])}</option>
                 {/each}
               </select>
-              <select value={plc.recipe ?? ''} onchange={(e) => onRecipeChange(group.name, plc.ip, e.currentTarget.value)}>
+              <select value={plc.recipe_name ?? ''} onchange={(e) => onRecipeChange(group.name, plc.ip, e.currentTarget.value)}>
                 <option value="">{translate($lang, 'service_demo_recipe_none')}</option>
                 {#each RECIPES as r (r)}
                   <option value={r}>{r}</option>
@@ -180,6 +190,15 @@
                 disabled={plc.state !== 'BAKING'}
                 value={plc.remaining_seconds ?? ''}
                 onchange={(e) => onRemainingChange(group.name, plc.ip, e.currentTarget.value)}
+              />
+              <input
+                type="number"
+                step="1"
+                min="-50"
+                max="400"
+                class="temp-input"
+                value={plc.oil_temp_current != null ? Math.round(plc.oil_temp_current) : ''}
+                onchange={(e) => onTempChange(group.name, plc.ip, e.currentTarget.value)}
               />
             </div>
           {/each}
@@ -273,8 +292,8 @@
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
-    /* Five columns' worth of minmax() floors (unit/state/recipe/online/
-       remaining) can need more width than a narrow card has to give —
+    /* Six columns' worth of minmax() floors (unit/state/recipe/online/
+       remaining/temperature) can need more width than a narrow card has to give —
        scroll horizontally right here rather than forcing .card (and so
        the whole two-card row, and the page) wider. */
     overflow-x: auto;
@@ -289,7 +308,7 @@
     display: grid;
     grid-template-columns:
       minmax(2.5rem, 0.5fr) minmax(6.5rem, 1.2fr) minmax(6.5rem, 1.2fr) minmax(3.5rem, 0.6fr)
-      minmax(5.5rem, 0.9fr);
+      minmax(5.5rem, 0.9fr) minmax(4.5rem, 0.8fr);
     align-items: center;
     gap: 0.6rem;
     padding: clamp(0.4rem, 0.8vh, 0.6rem) clamp(0.5rem, 1vw, 0.75rem);

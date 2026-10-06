@@ -1,166 +1,135 @@
 """
 test_priority.py
 -----------------
-Plain-assert self-test for priority.calculate_priority() against the
-spec's worked examples. No pytest needed:
+Plain-assert self-test for priority.select_next_action() — which machine
+the Next Action banner and the NEXT badge point at — and for the state
+mapping v2 integers. No pytest needed:
 
     python -m production_pilot.test_priority
 """
 
 from __future__ import annotations
 
-from .models import MachineGroup, MachineState, PlcData
-from .priority import calculate_priority
+from .models import OPCUA_STATE_MAP, MachineState, PlcData
+from .priority import (
+    ACTION_ALL_BAKING,
+    ACTION_ERROR,
+    ACTION_LOAD,
+    ACTION_NONE,
+    ACTION_SWITCH_TO_AUTO,
+    ACTION_UNLOAD_SOON,
+    select_next_action,
+)
 
-COLD    = MachineState.COLD
-HEATING = MachineState.HEATING
-READY   = MachineState.READY
-BAKING  = MachineState.BAKING
 ERROR   = MachineState.ERROR
+COLD    = MachineState.COLD
+HOT     = MachineState.HOT
+HEATING = MachineState.HEATING
+WAITING = MachineState.WAITING
+BLOCKED = MachineState.BLOCKED
+BAKING  = MachineState.BAKING
 
 
-def _names(plcs: list[PlcData]) -> list[str]:
-    return [p.name for p in plcs]
-
-
-def _run_case(label: str, group: MachineGroup, expected: list[str]) -> bool:
-    result = _names(calculate_priority(group))
-    ok = result == expected
-    status = "PASS" if ok else "FAIL"
-    print(f"[{status}] {label}")
+def _check(label: str, actual, expected) -> bool:
+    ok = actual == expected
+    print(f"[{'PASS' if ok else 'FAIL'}] {label}")
     if not ok:
         print(f"         expected: {expected}")
-        print(f"         actual:   {result}")
+        print(f"         actual:   {actual}")
     return ok
 
 
-def main() -> bool:
+def machines(*specs) -> list[PlcData]:
+    """Machines 1..n in saved order (= list order). Each spec is a state,
+    or (state, remaining_seconds), or (state, remaining_seconds, is_online)."""
+    plcs = []
+    for index, spec in enumerate(specs):
+        state, remaining, online = (spec, None, True) if isinstance(spec, MachineState) else (*spec, True)[:3]
+        plcs.append(PlcData(ip=f"10.0.0.{index + 1}", name=f"M{index + 1}", state=state,
+                            is_online=online, remaining_seconds=remaining,
+                            default_priority=index, unit_number=index + 1))
+    return plcs
+
+
+def pick(plcs: list[PlcData]) -> tuple:
+    result = select_next_action(plcs)
+    return result["kind"], result["unit_number"]
+
+
+ALMOST_DONE = (BAKING, 20)
+BAKING_LONG = (BAKING, 600)
+
+
+def test_state_mapping() -> list[bool]:
+    print("--- state mapping v2 (::auto:external_machine_state) ---")
+    expected = {0: "ERROR", 1: "COLD", 2: "HOT", 3: "HEATING", 4: "WAITING", 5: "BLOCKED", 6: "BAKING"}
+    results = [_check("0..6 -> Error, Cold, Hot, Heating, Waiting, Blocked, Baking",
+                      {k: v.name for k, v in OPCUA_STATE_MAP.items()}, expected)]
+    results.append(_check("display names", [OPCUA_STATE_MAP[i].value for i in range(7)],
+                          ["Error", "Cold", "Hot", "Heating", "Waiting", "Blocked", "Baking"]))
+    results.append(_check("no READY member any more", "READY" in MachineState.__members__, False))
+    results.append(_check("7 is not a valid state", OPCUA_STATE_MAP.get(7), None))
+    return results
+
+
+def test_select_next_action() -> list[bool]:
+    print()
+    print("--- select_next_action ---")
     results = []
 
-    # --- Test case A --------------------------------------------------
-    group_a = MachineGroup(
-        name="Trio Test", type="TRIO",
-        plcs=[
-            PlcData(ip="192.168.178.152", name="PLC152", state=READY,
-                    is_online=True, default_priority=0),
-            PlcData(ip="192.168.178.150", name="PLC150", state=HEATING,
-                    is_online=True, default_priority=1),
-            PlcData(ip="192.168.178.151", name="PLC151", state=READY,
-                    is_online=True, default_priority=2),
-        ],
-    )
-    results.append(_run_case(
-        "Test case A — one HEATING among two READY",
-        group_a, ["PLC152", "PLC151", "PLC150"],
-    ))
+    # The three examples from the spec (saved order 1, 2, 3, 4).
+    results.append(_check("M1 almost finished, M3 Waiting -> 3: Load Machine",
+                          pick(machines(ALMOST_DONE, HEATING, WAITING, COLD)), (ACTION_LOAD, 3)))
+    # Waiting and Hot share one tier: saved order decides between them.
+    results.append(_check("screen example: M1 Hot, M2 Heating, M3+M4 Waiting -> 1: Switch to Auto",
+                          pick(machines(HOT, HEATING, WAITING, WAITING)), (ACTION_SWITCH_TO_AUTO, 1)))
+    results.append(_check("Hot ranked above Waiting -> Switch to Auto",
+                          pick(machines(BAKING_LONG, HOT, WAITING)), (ACTION_SWITCH_TO_AUTO, 2)))
+    results.append(_check("Waiting ranked above Hot -> Load Machine",
+                          pick(machines(BAKING_LONG, WAITING, HOT)), (ACTION_LOAD, 2)))
+    results.append(_check("Hot + Almost finished ranked higher -> Hot wins",
+                          pick(machines(ALMOST_DONE, BAKING_LONG, HOT)), (ACTION_SWITCH_TO_AUTO, 3)))
+    results.append(_check("Error still beats a higher-ranked Hot",
+                          pick(machines(HOT, ERROR)), (ACTION_ERROR, 2)))
+    results.append(_check("only M2 Hot -> 2: Switch to Auto",
+                          pick(machines(BAKING_LONG, HOT, HEATING, COLD)), (ACTION_SWITCH_TO_AUTO, 2)))
 
-    # --- Test case B --------------------------------------------------
-    group_b = MachineGroup(
-        name="Trio Test", type="TRIO",
-        plcs=[
-            PlcData(ip="192.168.178.152", name="PLC152", state=READY,
-                    is_online=True, default_priority=0),
-            PlcData(ip="192.168.178.150", name="PLC150", state=ERROR,
-                    is_online=True, default_priority=1),
-            PlcData(ip="192.168.178.151", name="PLC151", state=BAKING,
-                    is_online=True, remaining_seconds=20, default_priority=2),
-        ],
-    )
-    results.append(_run_case(
-        "Test case B — ERROR first; near-done BAKING has no rank of its own, "
-        "so the higher-priority READY stays ahead of it",
-        group_b, ["PLC150", "PLC152", "PLC151"],
-    ))
+    results.append(_check("Error first, ahead of Waiting, Hot and Almost finished",
+                          pick(machines(WAITING, HOT, ALMOST_DONE, ERROR)), (ACTION_ERROR, 4)))
+    results.append(_check("Hot beats Almost finished, even ranked lower",
+                          pick(machines(ALMOST_DONE, HOT)), (ACTION_SWITCH_TO_AUTO, 2)))
+    results.append(_check("Almost finished only -> Unload Soon",
+                          pick(machines(BAKING_LONG, ALMOST_DONE, HEATING)), (ACTION_UNLOAD_SOON, 2)))
+    results.append(_check("same category -> higher saved rank wins",
+                          pick(machines(BAKING_LONG, WAITING, WAITING)), (ACTION_LOAD, 2)))
+    results.append(_check("two Almost finished -> saved order, NOT shortest remaining",
+                          pick(machines((BAKING, 25), (BAKING, 5))), (ACTION_UNLOAD_SOON, 1)))
 
-    # --- Test case C --------------------------------------------------
-    group_c = MachineGroup(
-        name="Trio Test 2", type="TRIO",
-        plcs=[
-            PlcData(ip="192.168.178.152", name="PLC152", state=READY,
-                    is_online=True, default_priority=0),
-            PlcData(ip="192.168.178.150", name="PLC150", state=READY,
-                    is_online=True, default_priority=1),
-            PlcData(ip="192.168.178.151", name="PLC151", state=READY,
-                    is_online=True, default_priority=2),
-        ],
-    )
-    results.append(_run_case(
-        "Test case C — all READY/online -> Step 1 shortcut, default order",
-        group_c, ["PLC152", "PLC150", "PLC151"],
-    ))
+    results.append(_check("Blocked is never chosen",
+                          pick(machines(BLOCKED, BLOCKED, HEATING)), (ACTION_NONE, None)))
+    results.append(_check("Blocked ranked first is skipped for a later Waiting",
+                          pick(machines(BLOCKED, WAITING)), (ACTION_LOAD, 2)))
+    results.append(_check("offline Error / Waiting / Hot are never chosen",
+                          pick(machines((ERROR, None, False), (WAITING, None, False), (HOT, None, False), COLD)),
+                          (ACTION_NONE, None)))
+    results.append(_check("Baking with exactly 30 s left is not Almost finished",
+                          pick(machines((BAKING, 30))), (ACTION_ALL_BAKING, None)))
 
-    # --- Test case D --------------------------------------------------
-    group_d = MachineGroup(
-        name="Duo Test", type="DUO",
-        plcs=[
-            PlcData(ip="192.168.178.160", name="PLCa", state=COLD,
-                    is_online=True, default_priority=0),
-            PlcData(ip="192.168.178.161", name="PLCb", state=READY,
-                    is_online=False, default_priority=1),
-        ],
-    )
-    results.append(_run_case(
-        "Test case D — COLD and offline both sink to tier 5",
-        group_d, ["PLCa", "PLCb"],
-    ))
+    results.append(_check("all online machines Baking -> all_baking (offline ones ignored)",
+                          pick(machines(BAKING_LONG, (BAKING, None), (COLD, None, False))),
+                          (ACTION_ALL_BAKING, None)))
+    results.append(_check("Baking + Heating -> none, not all_baking",
+                          pick(machines(BAKING_LONG, HEATING)), (ACTION_NONE, None)))
+    results.append(_check("everything offline -> none",
+                          pick(machines((BAKING, 600, False))), (ACTION_NONE, None)))
+    results.append(_check("no machines -> none", pick([]), (ACTION_NONE, None)))
+    results.append(_check("result carries the chosen PLC's ip",
+                          select_next_action(machines(COLD, WAITING))["ip"], "10.0.0.2"))
+    return results
 
-    # --- Test case E --------------------------------------------------
-    group_e = MachineGroup(
-        name="Trio Test 3", type="TRIO",
-        plcs=[
-            PlcData(ip="192.168.178.152", name="PLC152", state=READY,
-                    is_online=True, default_priority=0),
-            PlcData(ip="192.168.178.150", name="PLC150", state=ERROR,
-                    is_online=True, default_priority=1),
-            PlcData(ip="192.168.178.151", name="PLC151", state=BAKING,
-                    is_online=True, remaining_seconds=180, default_priority=2),
-        ],
-    )
-    results.append(_run_case(
-        "Test case E — BAKING with 180s remaining is NOT near-done "
-        "under the 30s threshold, falls into the default priority tier",
-        group_e, ["PLC150", "PLC152", "PLC151"],
-    ))
 
-    # --- Almost-finished cases (saved order 1, 2, 3, 4) ----------------
-    def quattro(states: dict[int, tuple]) -> MachineGroup:
-        """Machines M1..M4 at default_priority 0..3; states[n] is
-        (state, remaining_seconds) for machine n, READY by default."""
-        return MachineGroup(
-            name="Quattro Test", type="QUATTRO",
-            plcs=[
-                PlcData(ip=f"10.0.0.{n}", name=f"M{n}",
-                        state=states.get(n, (READY, None))[0],
-                        remaining_seconds=states.get(n, (READY, None))[1],
-                        is_online=True, default_priority=n - 1)
-                for n in (1, 2, 3, 4)
-            ],
-        )
-
-    results.append(_run_case(
-        "Test case F — M3 Almost finished, rest READY: stays in saved order",
-        quattro({3: (BAKING, 20)}), ["M1", "M2", "M3", "M4"],
-    ))
-    results.append(_run_case(
-        "Test case G — M1 Almost finished, M3 READY: no jump, saved order",
-        quattro({1: (BAKING, 20), 2: (HEATING, None), 3: (READY, None), 4: (COLD, None)}),
-        ["M1", "M3", "M2", "M4"],
-    ))
-    results.append(_run_case(
-        "Test case H — two Almost finished: saved order, NOT shortest remaining first",
-        quattro({1: (BAKING, 25), 2: (BAKING, 5), 3: (HEATING, None), 4: (HEATING, None)}),
-        ["M1", "M2", "M3", "M4"],
-    ))
-    results.append(_run_case(
-        "Test case I — Almost finished, BAKING >= 30s and READY share one tier",
-        quattro({1: (BAKING, 600), 2: (BAKING, 10), 3: (READY, None), 4: (ERROR, None)}),
-        ["M4", "M1", "M2", "M3"],
-    ))
-    results.append(_run_case(
-        "Test case J — all READY/online -> saved order (unchanged)",
-        quattro({}), ["M1", "M2", "M3", "M4"],
-    ))
-
+def main() -> bool:
+    results = test_state_mapping() + test_select_next_action()
     all_passed = all(results)
     print()
     print("ALL PASSED" if all_passed else "SOME FAILED")

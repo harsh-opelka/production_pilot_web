@@ -178,9 +178,35 @@ export function getProductivityTarget() {
   return serviceFetch('/api/service/productivity-target');
 }
 
+export function getHotColdThreshold() {
+  return serviceFetch('/api/service/hot-cold-threshold');
+}
+
+export function setHotColdThreshold(thresholdC) {
+  return serviceFetch('/api/service/hot-cold-threshold', {
+    method: 'PUT',
+    body: JSON.stringify({ threshold_c: thresholdC }),
+  });
+}
+
 export function setProductivityTarget(targetPct) {
   return serviceFetch('/api/service/productivity-target', {
     method: 'POST',
     body: JSON.stringify({ target_pct: targetPct }),
+  });
+}
+
+// Floor layout — readable without a session (the anonymous dashboard
+// renders it), so a plain fetch rather than serviceFetch.
+export async function getLayout() {
+  const res = await fetch('/api/layout');
+  if (!res.ok) throw new ServiceApiError(`Request failed (${res.status})`, res.status);
+  return res.json();
+}
+
+export function saveLayout(layout) {
+  return serviceFetch('/api/layout', {
+    method: 'PUT',
+    body: JSON.stringify(layout),
   });
 }

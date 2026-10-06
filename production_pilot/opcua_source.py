@@ -9,16 +9,23 @@ MachineWorker's QThread poll loop (worker.py), so nothing here may
 touch Qt widgets, and no read is allowed to block for long — a dead
 PLC must not stall the other PLCs' reads or the poll loop itself.
 
-Node IDs (confirmed identical on every connected PLC, Tim):
-    state:           "::auto:external_machine_state"  -> int, see
+Node IDs (confirmed identical on every connected PLC, Tim), all in
+namespace _NAMESPACE_INDEX as string node ids:
+    state:           "::auto:external_machine_state"  -> int 0..6, see
                       models.OPCUA_STATE_MAP for the value mapping
     remaining time:  "::auto:ActRestzeitGes"           -> int seconds,
                       no scaling conversion needed
+  Optional (a failed read never takes the PLC offline — see _OPTIONAL_NODES):
+    current oil temp: "::tempregl:ActOilTemp"                      -> float °C
+    target oil temp:  "::AsGlobalPV:gFormatSet.BackTemperatur"     -> number °C
+    recipe name:      "::AsGlobalPV:gFormatVerwaltung.ActFormatName" -> string
 """
 
 from __future__ import annotations
 
+import math
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 try:
@@ -37,6 +44,9 @@ _CONNECT_TIMEOUT = 2.0  # seconds — short so a dead PLC can't stall the poll l
 
 _STATE_NODE_ID = "::auto:external_machine_state"
 _REMAINING_TIME_NODE_ID = "::auto:ActRestzeitGes"
+_OIL_TEMP_CURRENT_NODE_ID = "::tempregl:ActOilTemp"
+_OIL_TEMP_TARGET_NODE_ID = "::AsGlobalPV:gFormatSet.BackTemperatur"
+_RECIPE_NAME_NODE_ID = "::AsGlobalPV:gFormatVerwaltung.ActFormatName"
 
 # B&R Automation Studio auto-exported OPC UA globals (the "::auto:" prefix)
 # live in this namespace on Opelka's PLCs.
@@ -45,6 +55,42 @@ _NAMESPACE_INDEX = 6
 
 def _node_id(identifier: str) -> str:
     return f"ns={_NAMESPACE_INDEX};s={identifier}"
+
+
+def _to_temperature(value) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
+def _to_recipe_name(value) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    # PLC strings are often fixed-length buffers padded with NULs.
+    text = str(value).replace("\x00", "").strip()
+    return text or None
+
+
+# PlcReading field -> (node identifier, converter). Read after the required
+# state/remaining-time nodes; each one is independent and optional — see
+# _PlcConnection._read_optional.
+_OPTIONAL_NODES = {
+    "oil_temp_current": (_OIL_TEMP_CURRENT_NODE_ID, _to_temperature),
+    "oil_temp_target": (_OIL_TEMP_TARGET_NODE_ID, _to_temperature),
+    "recipe_name": (_RECIPE_NAME_NODE_ID, _to_recipe_name),
+}
+
+
+@dataclass
+class PlcReading:
+    state: MachineState
+    remaining_seconds: int | None
+    oil_temp_current: float | None = None
+    oil_temp_target: float | None = None
+    recipe_name: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -64,6 +110,9 @@ class _PlcConnection:
         self._ip = ip
         self._port = port
         self._client: Client | None = None
+        # Optional node identifiers whose current failure streak has
+        # already been logged — one warning per streak, not one per poll.
+        self._warned: set[str] = set()
 
     def _connect(self) -> None:
         client = Client(f"opc.tcp://{self._ip}:{self._port}", timeout=_CONNECT_TIMEOUT)
@@ -78,11 +127,30 @@ class _PlcConnection:
                 pass
             self._client = None
 
-    def read(self) -> tuple[MachineState, int | None] | None:
+    def _read_optional(self, identifier: str, convert):
+        """One optional node: its converted value, or None on any failure
+        (missing node, bad value, ...). Never raises and never drops the
+        connection — the required reads already proved the PLC is up."""
+        try:
+            value = convert(self._client.get_node(_node_id(identifier)).get_value())
+        except Exception as exc:
+            if identifier not in self._warned:
+                self._warned.add(identifier)
+                print(f"[opcua] {self._ip}: optional node {identifier!r} unreadable ({exc}) — showing it as blank")
+            return None
+        if identifier in self._warned:
+            self._warned.discard(identifier)
+            print(f"[opcua] {self._ip}: optional node {identifier!r} readable again")
+        return value
+
+    def read(self) -> PlcReading | None:
         """
-        Returns (state, remaining_seconds) on success, or None if the PLC
-        is unreachable, the connection fails, or the state node doesn't
-        return a value in OPCUA_STATE_MAP. Never raises.
+        Returns a PlcReading on success, or None if the PLC is
+        unreachable, the connection fails, or the state node doesn't
+        return a value in OPCUA_STATE_MAP. Never raises. Only the state
+        and remaining-time nodes decide online/offline; the optional
+        nodes (temperatures, recipe) just come back as None when they
+        can't be read.
         """
         try:
             if self._client is None:
@@ -95,14 +163,18 @@ class _PlcConnection:
 
             remaining_value = self._client.get_node(_node_id(_REMAINING_TIME_NODE_ID)).get_value()
             remaining_seconds = int(remaining_value) if remaining_value is not None else None
-
-            return state, remaining_seconds
         except Exception:
             # Covers unreachable host, failed/expired session, and a
             # malformed state value alike — don't guess, just go offline
             # and let the next poll's lazy _connect() retry from scratch.
             self._drop()
             return None
+
+        optional = {
+            field: self._read_optional(identifier, convert)
+            for field, (identifier, convert) in _OPTIONAL_NODES.items()
+        }
+        return PlcReading(state=state, remaining_seconds=remaining_seconds, **optional)
 
 
 # ---------------------------------------------------------------------------
@@ -168,8 +240,17 @@ class OpcUaSource:
                 if result is None:
                     plc.is_online = False
                     plc.remaining_seconds = None
+                    # Last-known values aren't trustworthy while offline —
+                    # show blanks rather than stale numbers.
+                    plc.oil_temp_current = None
+                    plc.oil_temp_target = None
+                    plc.recipe_name = None
                 else:
-                    plc.state, plc.remaining_seconds = result
+                    plc.state = result.state
+                    plc.remaining_seconds = result.remaining_seconds
+                    plc.oil_temp_current = result.oil_temp_current
+                    plc.oil_temp_target = result.oil_temp_target
+                    plc.recipe_name = result.recipe_name
                     plc.is_online = True
                 self._online[plc.ip] = plc.is_online
 

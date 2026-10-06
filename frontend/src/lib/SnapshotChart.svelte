@@ -30,7 +30,7 @@
     const textColor = cssVar('--text-secondary');
     const gridColor = cssVar('--border-color');
     const bakingColor = cssVar('--state-baking');
-    const waitingColor = cssVar('--state-ready');
+    const waitingColor = cssVar('--state-waiting');
     const errorColor = cssVar('--state-error');
 
     const labels = data.map((m) => `${m.group_name} — ${formatUnitLabel(m.unit_number, language)}`);
@@ -39,7 +39,7 @@
     // duration bars, so the axis never reads in meaninglessly tiny
     // fractions (short durations) or awkwardly large counts (long ones)
     // — see format.js's pickDurationUnit.
-    const maxDuration = Math.max(0, ...data.map((m) => m.baking_seconds), ...data.map((m) => m.ready_seconds), ...data.map((m) => m.error_seconds));
+    const maxDuration = Math.max(0, ...data.map((m) => m.baking_seconds), ...data.map((m) => m.waiting_seconds), ...data.map((m) => m.error_seconds));
     const { divisor, labelKey } = pickDurationUnit(maxDuration);
 
     const next = new Chart(canvasEl, {
@@ -55,7 +55,7 @@
           },
           {
             label: translate(language, 'stats_metric_waiting'),
-            data: data.map((m) => m.ready_seconds / divisor),
+            data: data.map((m) => m.waiting_seconds / divisor),
             backgroundColor: waitingColor,
             yAxisID: 'duration',
           },

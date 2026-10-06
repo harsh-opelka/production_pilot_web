@@ -10,18 +10,33 @@
      dashboard scales together from this one variable. */
   --ui-scale: 1;
 
-  /* Opelka brand blue — READY state, active nav/toggle highlights, and
-     the "Next action" Ready-tier pill. Fixed (not theme-dependent): it's
+  /* Opelka brand blue — WAITING state, active nav/toggle highlights, and
+     the "Next action" Load-tier pill. Fixed (not theme-dependent): it's
      a brand colour, not a UI accent that should shift with light/dark. */
   --opelka-blue: #05346c;
   --opelka-blue-fg: #ffffff;
 
+  /* Machine-state colours — the ONE place to tune them (tiles, list dots,
+     legend, Next Action banner, Statistics timeline/charts all read these).
+     Deliberately theme-independent: a state must look the same on every
+     screen. Every pair below is readable on both the light and the dark
+     app background. */
   --state-cold: #6b7280;
   --state-cold-fg: #ffffff;
   --state-heating: #f59e0b;
   --state-heating-fg: #1c1c1c;
-  --state-ready: var(--opelka-blue);
-  --state-ready-fg: var(--opelka-blue-fg);
+  /* Hot = hot but NOT in auto mode. Purple, clearly apart from Heating's
+     amber and Cold's grey. */
+  --state-hot: #9333ea;
+  --state-hot-fg: #ffffff;
+  --state-waiting: var(--opelka-blue);
+  --state-waiting-fg: var(--opelka-blue-fg);
+  /* Blocked = waiting for another machine. Dark grey-blue slate, always
+     drawn with a dashed border (--state-blocked-border) — lighter and at
+     full opacity, unlike the dimmed Offline tile. */
+  --state-blocked: #334e68;
+  --state-blocked-fg: #ffffff;
+  --state-blocked-border: #9fb3c8;
   --state-baking: #16a34a;
   --state-baking-fg: #ffffff;
   --state-error: #dc2626;
@@ -75,12 +90,10 @@
   --font-toggle: clamp(0.9rem, 1.1vw, 1.15rem);
   --font-group-header: clamp(1.2rem, 1.7vw, 1.9rem);
   --font-tile-sub: clamp(0.85rem, 1.05vw, 1.15rem);
-  /* Tile unit number: a step up from --font-tile-sub (which the recipe
-     line still uses) so it's more readable at a glance, but deliberately
-     kept below --font-tile-time's range — font-weight is what mainly
-     separates it from State/Time (see FryerTile.svelte's .unit), so the
-     size gap only needs to be moderate, not large. */
-  --font-tile-unit: clamp(0.95rem, 1.15vw, 1.35rem);
+  /* Tile machine number: the biggest thing on the tile (bold, ~2x the
+     previous clamp(0.95rem, 1.15vw, 1.35rem)) so a machine can be found
+     from across the hall — see FryerTile.svelte's .unit. */
+  --font-tile-unit: clamp(1.9rem, 2.3vw, 2.7rem);
   --font-tile-state: clamp(1.05rem, 1.4vw, 1.65rem);
   --font-tile-time: clamp(0.95rem, 1.2vw, 1.4rem);
   --font-banner: clamp(1.2rem, 1.7vw, 1.9rem);
@@ -105,6 +118,16 @@
 }
 
 :root[data-theme='dark'] {
+  /* Heating tile with a known oil level (FryerTile.svelte): the empty part
+     above the orange fill. Not a dark surface on purpose — the tile text
+     must be dark to read on the orange (7.9:1; white is only 2.1:1), and
+     dark text on a dark surface is unreadable. This light slate keeps dark
+     text at 9.4:1 and stands clearly apart from the dark page. */
+  --heating-empty-bg: #b6c2d1;
+  --heating-empty-border: #64748b;
+  /* Next Action banner when every machine is baking (TopBar.svelte). */
+  --banner-all-baking-bg: #1e293b;
+  --banner-all-baking-fg: var(--text-primary);
   --bg-app: #0f172a;
   --bg-topbar: #111827;
   --bg-panel: #1e293b;
@@ -129,6 +152,11 @@
 }
 
 :root[data-theme='light'] {
+  /* See the dark block: white empty part, thin neutral border. */
+  --heating-empty-bg: #ffffff;
+  --heating-empty-border: #cbd5e1;
+  --banner-all-baking-bg: #ffffff;
+  --banner-all-baking-fg: var(--text-primary);
   --bg-app: #eef2f7;
   --bg-topbar: #ffffff;
   --bg-panel: #ffffff;
@@ -197,4 +225,19 @@ button {
 img {
   display: block;
   max-width: 100%;
+}
+
+/* Registered as lengths so getComputedStyle() resolves their clamp() to
+   px — Dashboard.svelte reads them to give floor-layout tiles exactly the
+   stacked grid's column width (see floorLayout.stackedTileWidth). */
+@property --probe-min-w {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --probe-gap {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
 }

@@ -41,6 +41,29 @@ export function stateLabel(plc, language) {
   return translate(language, key);
 }
 
+// Shown wherever a PLC value is unknown — never an invented number.
+export const BLANK = '—';
+
+// "29 / 20 °C" (current / target, whole degrees) for the tile and list
+// view. A missing side shows as "—"; both missing collapses to just "—".
+export function formatTemperature(current, target) {
+  if (current == null && target == null) return BLANK;
+  const whole = (v) => (v == null ? BLANK : String(Math.round(v)));
+  return `${whole(current)} / ${whole(target)} °C`;
+}
+
+// Heating tile "fill level" (FryerTile.svelte): how far the oil has come
+// towards its target, 0..1. null = no fill (a value missing, or no usable
+// target) — never a guessed level.
+export function heatingFillLevel(current, target) {
+  if (current == null || target == null || !(target > 0)) return null;
+  return Math.min(1, Math.max(0, current / target));
+}
+
+export function formatRecipe(recipeName) {
+  return recipeName ? recipeName : BLANK;
+}
+
 export function formatHoursMinutes(seconds, language) {
   const total = Math.max(0, Math.round(seconds ?? 0));
   const h = Math.floor(total / 3600);

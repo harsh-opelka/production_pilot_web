@@ -15,7 +15,7 @@
 
   const CATEGORIES = [
     { key: 'error_seconds', labelKey: 'stats_metric_error', colorVar: '--state-error' },
-    { key: 'ready_seconds', labelKey: 'stats_metric_waiting', colorVar: '--state-ready' },
+    { key: 'waiting_seconds', labelKey: 'stats_metric_waiting', colorVar: '--state-waiting' },
     { key: 'cold_seconds', labelKey: 'stats_col_cold', colorVar: '--state-cold' },
   ];
 

@@ -2,11 +2,11 @@
   import logo from '../assets/opelka_logo.png';
   import { machinesState, lang, page, auth, sidebarOpen } from './stores.js';
   import { translate } from './translations.js';
-  import { computeNextAction } from './nextAction.js';
+  import { describeNextAction } from './nextAction.js';
   import AuthGate from './AuthGate.svelte';
   import KpiSummary from './KpiSummary.svelte';
 
-  let nextAction = $derived(computeNextAction($machinesState.groups, $lang));
+  let nextAction = $derived(describeNextAction($machinesState.next_action, $lang));
 
   // bind:this target for AuthGate below — the login trigger used to be a
   // standalone hamburger button (see AuthGate.svelte's history); now it's
@@ -31,9 +31,28 @@
 
 <header class="topbar">
   <div class="next-action">
-    <div class="next-action-box tier-{nextAction.tier}">
+    <div class="next-action-box tier-{nextAction.tier}" class:all-baking={nextAction.allBaking}>
       <span class="na-label">{translate($lang, 'next_action_prefix')}</span>
-      <span class="na-content">{nextAction.text}</span>
+      {#if nextAction.allBaking}
+        <!-- Every online machine is baking: a smiley instead of the dash.
+             Inline SVG rather than an emoji — the Jetson may have no emoji
+             font. 1em square, so it matches the banner text size. -->
+        <span class="na-content">
+          <svg
+            class="smiley"
+            viewBox="0 0 24 24"
+            role="img"
+            aria-label={translate($lang, 'next_action_all_baking')}
+          >
+            <circle cx="12" cy="12" r="11" fill="#facc15" stroke="#a16207" stroke-width="1" />
+            <circle cx="8.5" cy="9.5" r="1.5" fill="#1c1c1c" />
+            <circle cx="15.5" cy="9.5" r="1.5" fill="#1c1c1c" />
+            <path d="M7.3 14 Q12 18.8 16.7 14" fill="none" stroke="#1c1c1c" stroke-width="1.9" stroke-linecap="round" />
+          </svg>
+        </span>
+      {:else}
+        <span class="na-content">{nextAction.text}</span>
+      {/if}
     </div>
   </div>
 
@@ -168,12 +187,34 @@
     color: var(--state-near-completion-fg);
   }
 
-  .tier-ready {
-    background: var(--opelka-blue);
+  .smiley {
+    display: block;
+    width: 1.15em;
+    height: 1.15em;
+  }
+
+  .tier-load {
+    background: var(--state-waiting);
+    color: var(--state-waiting-fg);
+  }
+
+  .tier-hot {
+    background: var(--state-hot);
+    color: var(--state-hot-fg);
   }
 
   .tier-none {
     background: var(--tier-none-bg);
+  }
+
+  /* Every machine baking: white banner (light theme) / dark surface (dark
+     theme) with the yellow smiley. The 1px outline is an inset shadow so
+     the box keeps exactly the size of the other banner states, and it
+     still shows on the white top bar. */
+  .tier-none.all-baking {
+    background: var(--banner-all-baking-bg);
+    color: var(--banner-all-baking-fg);
+    box-shadow: inset 0 0 0 1px var(--border-color);
   }
 
   .logo-panel {
