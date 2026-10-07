@@ -207,8 +207,8 @@ def _backup_path() -> Path:
 
 def migrate_state_mapping() -> int | None:
     """One-time, idempotent upgrade of state_transitions to state mapping
-    v2 (see models.OPCUA_STATE_MAP). Rows store the MachineState NAME, not
-    the PLC integer, so no value remap is needed — the only change is the
+    v2. Rows store the MachineState NAME, not the PLC integer (that
+    mapping lives in opcua_source.PLC_STATE_MAP), so no value remap is needed — the only change is the
     renamed member: READY -> WAITING, in both new_state and old_state.
 
     Guarded by app_settings.state_mapping_version, so it runs at most once

@@ -146,8 +146,10 @@ def main() -> bool:
     results.append(_check("next action: same pick with or without custom numbers",
                           next_action_ip(new_path), next_action_ip(old_path)))
     results.append(_check("next action: ERROR first", next_action_ip(new_path), IP_C))
-    results.append(_check("next action: WAITING once the ERROR machine is gone",
-                          next_action_ip(new_path, without=IP_C), IP_A))
+    # IP_D is Heating in the same group, so Waiting IP_A is not a Load
+    # candidate (priority.LOAD_BLOCKED_WHILE_GROUP_HEATING) — Almost finished is next.
+    results.append(_check("next action: ALMOST FINISHED once the ERROR machine is gone",
+                          next_action_ip(new_path, without=IP_C), IP_B))
 
     all_passed = all(results)
     print()

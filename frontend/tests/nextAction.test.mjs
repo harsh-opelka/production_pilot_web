@@ -26,7 +26,8 @@ registerHooks({
 });
 
 const { describeNextAction } = await import('../src/lib/nextAction.js');
-const { formatTemperature, formatRecipe, heatingFillLevel } = await import('../src/lib/format.js');
+const { translate } = await import('../src/lib/translations.js');
+const { formatTemperature, formatRecipe, heatingFillLevel, stateLabel } = await import('../src/lib/format.js');
 
 let allPassed = true;
 
@@ -46,26 +47,39 @@ function checkAction(label, nextAction, expected) {
       text,
       tier: expected.tier,
       ip: expected.ip,
-      allBaking: expected.allBaking ?? false,
+      nothingToDo: expected.nothingToDo ?? false,
     });
   }
 }
 
-const pick = (kind, n) => ({ kind, ip: `10.0.0.${n}`, unit_number: n });
+const pick = (kind, n, state = null) => ({ kind, ip: `10.0.0.${n}`, unit_number: n, state });
 
 checkAction('Error -> Check Error', pick('error', 2), {
   text: { en: '2: Check Error', de: '2: Störung prüfen' },
   tier: 'error',
   ip: '10.0.0.2',
 });
-checkAction('Hot -> Switch to Auto', pick('switch_to_auto', 1), {
+// The backend sends the same kind for a Standby machine whether it's shown
+// as Cold, Hot or Standby, so the banner TEXT is the same for all three —
+// but the colour follows the machine: yellow only for Hot, grey otherwise.
+checkAction('Hot -> Switch to Auto, yellow', pick('switch_to_auto', 1, 'HOT'), {
   text: { en: '1: Switch to Auto', de: '1: Auf Auto stellen' },
   tier: 'hot',
   ip: '10.0.0.1',
 });
-// Hot machine 4 beats Waiting machines 1 and 3 on the backend; the NEXT
-// badge follows the banner to machine 4.
-checkAction('Hot M4 over Waiting M1+M3 -> 4: Switch to Auto', pick('switch_to_auto', 4), {
+checkAction('Cold -> Switch to Auto, grey', pick('switch_to_auto', 2, 'COLD'), {
+  text: { en: '2: Switch to Auto', de: '2: Auf Auto stellen' },
+  tier: 'cold',
+  ip: '10.0.0.2',
+});
+checkAction('plain Standby -> Switch to Auto, grey like Cold', pick('switch_to_auto', 3, 'STANDBY'), {
+  text: { en: '3: Switch to Auto', de: '3: Auf Auto stellen' },
+  tier: 'cold',
+  ip: '10.0.0.3',
+});
+// Standby machine 4 beats Waiting machines 1 and 3 on the backend; the
+// NEXT badge follows the banner to machine 4.
+checkAction('Hot M4 over Waiting M1+M3 -> 4: Switch to Auto', pick('switch_to_auto', 4, 'HOT'), {
   text: { en: '4: Switch to Auto', de: '4: Auf Auto stellen' },
   tier: 'hot',
   ip: '10.0.0.4',
@@ -80,13 +94,17 @@ checkAction('Almost finished -> Unload Soon', pick('unload_soon', 4), {
   tier: 'near-completion',
   ip: '10.0.0.4',
 });
-checkAction('All baking -> smiley flag, no NEXT badge', { kind: 'all_baking', ip: null, unit_number: null }, {
+// e.g. all baking, or 1-3 Waiting while 4 in the same group is Heating.
+checkAction('Nothing to do right now -> smiley flag, no NEXT badge', { kind: 'nothing_to_do', ip: null, unit_number: null }, {
   text: { en: '–', de: '–' },
   tier: 'none',
   ip: null,
-  allBaking: true,
+  nothingToDo: true,
 });
-checkAction('Nothing actionable -> dash, no smiley', { kind: 'none', ip: null, unit_number: null }, {
+check('smiley screen-reader text (en / de)',
+  [translate('en', 'next_action_nothing_to_do'), translate('de', 'next_action_nothing_to_do')],
+  ['Nothing to do right now', 'Gerade nichts zu tun']);
+checkAction('No machine online -> dash, no smiley', { kind: 'none', ip: null, unit_number: null }, {
   text: { en: '–', de: '–' },
   tier: 'none',
   ip: null,
@@ -96,6 +114,19 @@ checkAction('No payload yet (before the first WS message) -> dash', undefined, {
   tier: 'none',
   ip: null,
 });
+
+// Tile state labels for the new / derived states, both languages.
+const tile = (state) => ({ state, is_online: true, near_completion: false });
+for (const [state, en, de] of [
+  ['STANDBY', 'Standby', 'Standby'],
+  ['UNRECOGNIZED', 'Unknown', 'Unbekannt'],
+  ['COLD', 'Cold', 'Kalt'],
+  ['HOT', 'Hot', 'Heiß'],
+]) {
+  check(`state label ${state} (en)`, stateLabel(tile(state), 'en'), en);
+  check(`state label ${state} (de)`, stateLabel(tile(state), 'de'), de);
+}
+check('Almost finished label (de)', stateLabel({ state: 'BAKING', is_online: true, near_completion: true }, 'de'), 'Fast fertig');
 
 check('temperature: current / target, rounded', formatTemperature(29.4, 20), '29 / 20 °C');
 check('temperature: missing target', formatTemperature(180.6, null), '181 / — °C');

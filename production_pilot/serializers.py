@@ -45,11 +45,12 @@ def group_to_dict(group: MachineGroup) -> dict:
 
 def build_state(groups: list[MachineGroup], connected: bool) -> dict:
     saved_order = [plc for group in groups for plc in _saved_order(group)]
+    group_by_ip = {plc.ip: group.name for group in groups for plc in group.plcs}
     return {
         "connected": connected,
         "timestamp": _now_iso(),
         "groups": [group_to_dict(g) for g in groups],
         # Derived from `groups`, so the WS broadcaster's change check
         # (which only compares groups/connected) still covers it.
-        "next_action": select_next_action(saved_order),
+        "next_action": select_next_action(saved_order, group_by_ip),
     }

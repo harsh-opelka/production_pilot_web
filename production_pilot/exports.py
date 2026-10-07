@@ -39,6 +39,7 @@ _DURATION_COLUMNS_BEFORE_COUNT = [
 ]
 _DURATION_COLUMNS_AFTER_COUNT = [
     ("Cold", "cold_seconds"),
+    ("Standby", "standby_seconds"),
     ("Offline", "offline_seconds"),
     ("No data (server offline)", "untracked_seconds"),
 ]
@@ -189,8 +190,8 @@ def to_pdf(summary: dict, totals: dict, target_pct: int | None, comparison: dict
     pdf.set_font("Helvetica", "", 8)
     pdf.set_draw_color(203, 213, 225)
     pdf.set_fill_color(255, 255, 255)  # the KPI boxes left it navy
-    # Group, Unit, 6 durations, Error Count, Cold, Offline, No data, Productivity
-    col_widths = (32, 11, 18, 18, 18, 16, 18, 18, 16, 18, 18, 30, 22)
+    # Group, Unit, 6 durations, Error Count, Cold, Standby, Offline, No data, Productivity
+    col_widths = (32, 11, 18, 18, 18, 16, 18, 18, 16, 18, 16, 18, 30, 22)
     with pdf.table(
         col_widths=col_widths,
         text_align=("LEFT", "CENTER", *(["RIGHT"] * (len(HEADERS) - 2))),

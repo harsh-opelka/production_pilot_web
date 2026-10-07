@@ -1,8 +1,8 @@
 """
 test_hot_cold.py
 -----------------
-Plain-assert self-test for hot_cold.py (Hot vs Cold from the oil
-temperature) and for its place in server.py's poll processing. No pytest
+Plain-assert self-test for hot_cold.py (Standby -> Cold / Hot from the
+oil temperature) and for its place in server.py's poll processing. No pytest
 needed — run from the project root:
 
     python -m production_pilot.test_hot_cold
@@ -22,6 +22,7 @@ from .models import MachineGroup, MachineState, PlcData
 
 ERROR, COLD, HOT, HEATING = MachineState.ERROR, MachineState.COLD, MachineState.HOT, MachineState.HEATING
 WAITING, BLOCKED, BAKING = MachineState.WAITING, MachineState.BLOCKED, MachineState.BAKING
+STANDBY, UNRECOGNIZED = MachineState.STANDBY, MachineState.UNRECOGNIZED
 THRESHOLD = 50.0
 IP = "192.0.2.77"
 
@@ -46,25 +47,27 @@ def _derived(rule: HotColdRule, state: MachineState, temp: float | None, online:
 
 
 def test_rule() -> list[bool]:
-    print("--- Hot/Cold rule ---")
+    print("--- Standby -> Cold / Hot rule ---")
     results = [
-        _check("PLC Cold at 80 °C -> Hot", classify(COLD, 80.0, THRESHOLD), HOT),
-        _check("PLC Hot at 30 °C -> Cold", classify(HOT, 30.0, THRESHOLD), COLD),
-        _check("PLC Cold, temp None -> raw Cold", classify(COLD, None, THRESHOLD), COLD),
-        _check("PLC Hot, temp None -> raw Hot", classify(HOT, None, THRESHOLD), HOT),
-        _check("exactly at the threshold -> Hot", classify(COLD, 50.0, THRESHOLD), HOT),
-        _check("in the band with no history -> Cold", classify(HOT, 49.0, THRESHOLD), COLD),
+        _check("Standby at 30 °C -> Cold", classify(STANDBY, 30.0, THRESHOLD), COLD),
+        _check("Standby at 60 °C -> Hot", classify(STANDBY, 60.0, THRESHOLD), HOT),
+        _check("Standby, temp None -> Standby (no guessing)", classify(STANDBY, None, THRESHOLD), STANDBY),
+        _check("exactly at the threshold -> Hot", classify(STANDBY, 50.0, THRESHOLD), HOT),
+        _check("in the band with no history -> Cold", classify(STANDBY, 49.0, THRESHOLD), COLD),
         _check("hysteresis constant is 2 °C", HYSTERESIS_C, 2.0),
     ]
-    for state in (HEATING, BAKING, ERROR, WAITING, BLOCKED):
+    for state in (HEATING, BAKING, ERROR, WAITING, BLOCKED, UNRECOGNIZED):
         results.append(_check(f"{state.name} at 20 °C unchanged", classify(state, 20.0, THRESHOLD), state))
         results.append(_check(f"{state.name} at 180 °C unchanged", classify(state, 180.0, THRESHOLD), state))
+        results.append(_check(f"{state.name}, temp None unchanged", classify(state, None, THRESHOLD), state))
 
     rule = HotColdRule()
-    results.append(_check("offline PLC never touched", _derived(rule, COLD, 80.0, online=False), COLD))
-    raw = _groups(COLD, 80.0)
+    results.append(_check("offline PLC never touched", _derived(rule, STANDBY, 80.0, online=False), STANDBY))
+    results.append(_check("rule: Standby at 30 °C -> Cold", _derived(rule, STANDBY, 30.0), COLD))
+    results.append(_check("rule: Standby, temp None -> Standby", _derived(rule, STANDBY, None), STANDBY))
+    raw = _groups(STANDBY, 80.0)
     rule.apply(raw, THRESHOLD)
-    results.append(_check("source's own PlcData keeps the raw PLC state", raw[0].plcs[0].state, COLD))
+    results.append(_check("source's own PlcData keeps the raw PLC state", raw[0].plcs[0].state, STANDBY))
     return results
 
 
@@ -75,12 +78,17 @@ def test_hysteresis() -> list[bool]:
     steps = [(30.0, COLD), (50.0, HOT), (49.0, HOT), (48.0, HOT), (47.9, COLD), (49.0, COLD), (50.0, HOT)]
     results = []
     for temp, expected in steps:
-        results.append(_check(f"PLC Cold at {temp} °C -> {expected.name}", _derived(rule, COLD, temp), expected))
+        results.append(_check(f"Standby at {temp} °C -> {expected.name}", _derived(rule, STANDBY, temp), expected))
 
     rule = HotColdRule()
-    _derived(rule, COLD, 55.0)
-    _derived(rule, HEATING, 49.0)  # leaves idle: memory cleared
-    results.append(_check("after leaving idle, the band starts fresh (Cold)", _derived(rule, COLD, 49.0), COLD))
+    _derived(rule, STANDBY, 55.0)
+    _derived(rule, HEATING, 49.0)  # leaves Standby: memory cleared
+    results.append(_check("after leaving Standby, the band starts fresh (Cold)", _derived(rule, STANDBY, 49.0), COLD))
+    rule = HotColdRule()
+    _derived(rule, STANDBY, 55.0)
+    _derived(rule, STANDBY, None)  # temperature unreadable: memory cleared
+    results.append(_check("after an unreadable temperature, the band starts fresh (Cold)",
+                          _derived(rule, STANDBY, 49.0), COLD))
     return results
 
 
@@ -118,9 +126,9 @@ def test_recorded_once() -> list[bool]:
     server._state_entered_at.clear()
     server._hot_cold_rule = HotColdRule()
 
-    # The PLC keeps reporting Cold the whole time; only the oil cools.
+    # The PLC keeps reporting Standby the whole time; only the oil cools.
     for temp in (80.0, 79.0, 60.0, 49.0, 48.0, 47.0, 46.0, 45.0):
-        server._process_poll(_groups(COLD, temp))
+        server._process_poll(_groups(STANDBY, temp))
 
     with sqlite3.connect(history.DB_PATH) as conn:
         rows = conn.execute(

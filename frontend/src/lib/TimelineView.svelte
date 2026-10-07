@@ -122,6 +122,7 @@
     { key: 'hot', labelKey: 'state_hot' },
     { key: 'blocked', labelKey: 'state_blocked' },
     { key: 'cold', labelKey: 'state_cold' },
+    { key: 'standby', labelKey: 'state_standby' },
     { key: 'error', labelKey: 'state_error' },
     { key: 'offline', labelKey: 'status_offline' },
   ];
@@ -281,6 +282,12 @@
 
   .seg-cold {
     background: var(--state-cold);
+  }
+
+  .seg-standby,
+  .seg-unrecognized {
+    background: var(--state-standby);
+    box-shadow: inset 0 0 0 1px var(--state-standby-border);
   }
 
   .seg-error {

@@ -20,9 +20,8 @@
   // is only meaningful when isNext is true.
   let { plc, language = 'en', isNext = false, tier = null } = $props();
 
-  // "Fast fertig"/"Almost finished" override: its own bright warning-
-  // yellow token (--state-near-completion), distinct from HEATING's
-  // amber-orange — see app.css. MachineState itself stays BAKING (see
+  // "Fast fertig"/"Almost finished" override: its own purple token
+  // (--state-near-completion) — see app.css. MachineState itself stays BAKING (see
   // production_pilot/priority.py's is_near_completion).
   let stateKey = $derived(plc.near_completion ? 'near-completion' : plc.state.toLowerCase());
   let label = $derived(stateLabel(plc, language));
@@ -34,7 +33,7 @@
   // ticks off the shared nowTick clock rather than its own interval, and
   // is derived from the server's state_entered_at so a reload resumes
   // from the true elapsed value instead of zero.
-  const TIMER_STATES = new Set(['COLD', 'HEATING', 'HOT', 'WAITING', 'BLOCKED', 'ERROR']);
+  const TIMER_STATES = new Set(['COLD', 'HEATING', 'HOT', 'STANDBY', 'WAITING', 'BLOCKED', 'ERROR', 'UNRECOGNIZED']);
   let showElapsed = $derived(!showRemaining && plc.is_online && TIMER_STATES.has(plc.state) && plc.state_entered_at != null);
   let elapsedText = $derived(showElapsed ? formatDuration(($nowTick - Date.parse(plc.state_entered_at)) / 1000, language) : '');
 
@@ -74,6 +73,7 @@
   class="tile {tierClass}"
   class:offline={!plc.is_online}
   class:blocked={plc.is_online && plc.state === 'BLOCKED'}
+  class:light-border={plc.is_online && (plc.state === 'STANDBY' || plc.state === 'UNRECOGNIZED')}
   class:heating-level={fillLevel != null}
   class:next-priority={isNext}
   style={tileStyle}
@@ -82,7 +82,7 @@
     <!-- Own clipping box (not overflow:hidden on .tile, which would clip
          the NEXT badge sticking out of the corner). -->
     <div class="fill-clip" aria-hidden="true">
-      <div class="fill" style="height: {fillLevel * 100}%;"><div class="wave"></div></div>
+      <div class="fill" style="height: {fillLevel * 100}%;"></div>
     </div>
   {/if}
   {#if isNext}
@@ -156,6 +156,15 @@
     border: 2px dashed var(--state-blocked-border);
   }
 
+  /* Standby without a temperature / Unknown: Cold's grey with a lighter
+     solid border, so they read apart from a real Cold tile (and from the
+     dimmed, dashed Offline tile). Inset, so the tile never changes size. */
+  .tile.light-border {
+    box-shadow:
+      var(--tile-shadow),
+      inset 0 0 0 3px var(--state-standby-border);
+  }
+
   .tile.offline {
     background: var(--offline-bg);
     color: var(--offline-fg);
@@ -183,7 +192,7 @@
 
   .tile.next-priority.tier-near-completion {
     --tile-accent: var(--state-near-completion);
-    --tile-accent-glow: rgba(250, 204, 21, 0.4);
+    --tile-accent-glow: rgba(147, 51, 234, 0.4);
   }
 
   .tile.next-priority.tier-load {
@@ -193,7 +202,16 @@
 
   .tile.next-priority.tier-hot {
     --tile-accent: var(--state-hot);
-    --tile-accent-glow: rgba(147, 51, 234, 0.4);
+    --tile-accent-fg: var(--state-hot-fg);
+    --tile-accent-glow: rgba(250, 204, 21, 0.4);
+  }
+
+  /* Cold / plain Standby picked for "Switch to Auto": the tile's own grey,
+     the same own-colour ring + soft halo a Waiting tile gets — no yellow. */
+  .tile.next-priority.tier-cold {
+    --tile-accent: var(--state-cold);
+    --tile-accent-fg: var(--state-cold-fg);
+    --tile-accent-glow: rgba(107, 114, 128, 0.35);
   }
 
   /* Text sits above the heating fill (which is absolutely positioned and
@@ -215,7 +233,8 @@
 
   /* Height is set inline from the fill level; the transition makes it
      rise smoothly between ~0.5 s polls instead of jumping. Only height
-     changes — the tile's own box never moves or resizes. */
+     changes — the tile's own box never moves or resizes. The top edge is
+     a plain straight line. */
   .fill {
     position: absolute;
     left: 0;
@@ -226,36 +245,6 @@
     transition: height 1.5s ease;
   }
 
-  /* Subtle wave along the fill's top edge: a strip twice the tile width,
-     slid sideways with a compositor-only transform — no JS, no layout. */
-  .wave {
-    position: absolute;
-    top: -0.3rem;
-    left: 0;
-    width: 200%;
-    height: 0.6rem;
-    background: radial-gradient(ellipse 1.5rem 0.45rem at 1.5rem 0.6rem, var(--state-heating) 98%, transparent 100%)
-      repeat-x;
-    background-size: 3rem 0.6rem;
-    animation: wave 6s linear infinite;
-    will-change: transform;
-  }
-
-  @keyframes wave {
-    from {
-      transform: translateX(0);
-    }
-    to {
-      transform: translateX(-50%);
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .wave {
-      display: none;
-    }
-  }
-
   .next-badge {
     position: absolute;
     top: -0.6rem;
@@ -263,7 +252,7 @@
     padding: 0.15rem 0.6rem;
     border-radius: 999px;
     background: var(--tile-accent, var(--opelka-blue));
-    color: #ffffff;
+    color: var(--tile-accent-fg, #ffffff);
     font-size: 0.7rem;
     font-weight: 700;
     text-transform: uppercase;

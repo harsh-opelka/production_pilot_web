@@ -89,8 +89,10 @@ from . import history
 from .opcua_source import CONFIG_PATH
 from .plc_config import load_config
 
-# The observed-time buckets, one per MachineState (named
-# f"{state.name.lower()}_seconds") plus offline. Everything in here is
+# The observed-time buckets, one per displayed MachineState (named
+# f"{state.name.lower()}_seconds") plus offline. UNRECOGNIZED (an
+# unexpected PLC value) has no bucket, so that time is left out of every
+# column and of the denominator. Everything in here is
 # summed to form the productivity denominator, so UNTRACKED_KEY is
 # deliberately NOT a member — see compute_daily_summary and
 # productivity_pct.
@@ -102,6 +104,9 @@ _SECONDS_KEYS = (
     "blocked_seconds",
     "error_seconds",
     "cold_seconds",
+    # Standby with an unreadable oil temperature — normally Standby shows
+    # up as cold_seconds / hot_seconds instead (see hot_cold.py).
+    "standby_seconds",
     "offline_seconds",
 )
 
@@ -113,10 +118,10 @@ _UNTRACKED_KEY = "untracked_seconds"
 
 def productivity_pct(baking_seconds: float, tracked_seconds: float) -> float:
     """THE productivity formula, shared by every caller: baking time over
-    all observed time (the sum of _SECONDS_KEYS — so Cold, Hot, Blocked,
-    Heating, Waiting, Error and Offline all count as available time for
-    now; still to be decided whether Cold/Hot/Blocked should). 0.0 when
-    nothing was observed."""
+    all observed time (the sum of _SECONDS_KEYS — so Cold, Hot, Standby,
+    Blocked, Heating, Waiting, Error and Offline all count as available
+    time for now; still to be decided whether Cold/Hot/Standby/Blocked
+    should). 0.0 when nothing was observed."""
     return round((baking_seconds / tracked_seconds) * 100, 1) if tracked_seconds > 0 else 0.0
 
 

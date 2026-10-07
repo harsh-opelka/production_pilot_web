@@ -20,14 +20,16 @@ const en = {
   // the larger text below it is built from the next_action_* keys below.
   next_action_prefix: 'Next Action',
   // One key per backend Next Action kind (priority.select_next_action,
-  // mapped in nextAction.js): Error, then Hot (not in auto mode -> switch
-  // it), then Waiting (empty -> load it), then Almost finished (unload soon).
+  // mapped in nextAction.js): Error, then Standby — shown as Cold, Hot or
+  // Standby (not in auto mode -> switch it) — then Waiting (empty -> load
+  // it), then Almost finished (unload soon).
   next_action_error: '{unit}: Check Error',
   next_action_switch_to_auto: '{unit}: Switch to Auto',
   next_action_load: '{unit}: Load Machine',
   next_action_near_completion: '{unit}: Unload Soon',
-  // Screen-reader text for the smiley shown when every online machine is baking.
-  next_action_all_baking: 'All machines baking',
+  // Screen-reader text for the smiley shown when there's nothing to do
+  // right now (all baking, or Waiting machines held back by Heating).
+  next_action_nothing_to_do: 'Nothing to do right now',
   no_action: '–',
   // Small corner badge on the one MachineTile matching the Next Action
   // banner (see FryerTile.svelte's isNext prop).
@@ -40,6 +42,11 @@ const en = {
   state_baking: 'Baking',
   state_error: 'Error',
   state_near_completion: 'Almost finished',
+  // Standby (not in auto mode) with an unreadable oil temperature — with a
+  // temperature it's shown as Cold or Hot instead (backend hot_cold.py).
+  state_standby: 'Standby',
+  // The PLC sent a state value the app doesn't know (MachineState.UNRECOGNIZED).
+  state_unrecognized: 'Unknown',
   status_offline: 'Offline',
   status_online: 'Online',
   unit_fryer: 'Machine',
@@ -90,6 +97,7 @@ const en = {
   stats_col_error: 'Error',
   stats_col_error_count: 'Errors',
   stats_col_cold: 'Cold',
+  stats_col_standby: 'Standby',
   stats_col_offline: 'Offline',
   stats_col_ip: 'IP',
   stats_col_no_data: 'No data (server offline)',
@@ -237,8 +245,9 @@ const en = {
   service_layout_no_groups: 'No machine groups configured yet.',
   service_layout_error: 'Could not save layout: {error}',
 
-  service_hot_cold_heading: 'Hot / Cold temperature threshold (°C)',
-  service_hot_cold_help: 'Machines at or above this oil temperature are shown as Hot, below as Cold.',
+  service_hot_cold_heading: 'Standby temperature threshold (Cold / Hot) (°C)',
+  service_hot_cold_help:
+    'A machine in Standby (not in auto mode) is shown as Hot at or above this oil temperature and as Cold below it.',
   service_hot_cold_label: 'Threshold (°C)',
   service_hot_cold_invalid: 'Enter a number between 20 and 150.',
   service_hot_cold_saved: 'Threshold saved — applies from the next update.',
@@ -276,12 +285,14 @@ const de = {
   next_action_load: '{unit}: Beladen',
   next_action_switch_to_auto: '{unit}: Auf Auto stellen',
   next_action_near_completion: '{unit}: Bald entladen',
-  next_action_all_baking: 'Alle Maschinen backen',
+  next_action_nothing_to_do: 'Gerade nichts zu tun',
   tile_next_badge: 'Nächste',
   state_hot: 'Heiß',
   state_waiting: 'Warte',
   state_blocked: 'Blockiert',
   state_near_completion: 'Fast fertig',
+  state_standby: 'Standby',
+  state_unrecognized: 'Unbekannt',
   theme_dark: 'Dunkel',
   theme_light: 'Hell',
   display_size: 'Anzeigegröße',
@@ -320,6 +331,7 @@ const de = {
   stats_col_error: 'Fehler',
   stats_col_error_count: 'Fehler (Anzahl)',
   stats_col_cold: 'Kalt',
+  stats_col_standby: 'Standby',
   stats_col_offline: 'Offline',
   stats_col_ip: 'IP',
   stats_col_no_data: 'Keine Daten (Server offline)',
@@ -434,8 +446,9 @@ const de = {
   service_layout_no_groups: 'Noch keine Maschinengruppen konfiguriert.',
   service_layout_error: 'Layout konnte nicht gespeichert werden: {error}',
 
-  service_hot_cold_heading: 'Heiß-/Kalt-Temperaturschwelle (°C)',
-  service_hot_cold_help: 'Maschinen ab dieser Öltemperatur werden als Heiß angezeigt, darunter als Kalt.',
+  service_hot_cold_heading: 'Standby-Temperaturschwelle (Kalt / Heiß) (°C)',
+  service_hot_cold_help:
+    'Eine Maschine im Standby (nicht im Automatikbetrieb) wird ab dieser Öltemperatur als Heiß angezeigt, darunter als Kalt.',
   service_hot_cold_label: 'Schwelle (°C)',
   service_hot_cold_invalid: 'Geben Sie eine Zahl zwischen 20 und 150 ein.',
   service_hot_cold_saved: 'Schwelle gespeichert — gilt ab der nächsten Aktualisierung.',

@@ -11,9 +11,10 @@
   let unitLabel = $derived(formatUnitNumber(plc.unit_number));
   let dotStyle = $derived(plc.is_online ? `background: var(--state-${stateKey});` : `background: var(--offline-border);`);
   let isBlocked = $derived(plc.is_online && plc.state === 'BLOCKED');
+  let isLightBorder = $derived(plc.is_online && (plc.state === 'STANDBY' || plc.state === 'UNRECOGNIZED'));
   let showRemaining = $derived(plc.is_online && plc.state === 'BAKING' && plc.remaining_seconds != null);
 
-  const TIMER_STATES = new Set(['COLD', 'HEATING', 'HOT', 'WAITING', 'BLOCKED', 'ERROR']);
+  const TIMER_STATES = new Set(['COLD', 'HEATING', 'HOT', 'STANDBY', 'WAITING', 'BLOCKED', 'ERROR', 'UNRECOGNIZED']);
   let showElapsed = $derived(!showRemaining && plc.is_online && TIMER_STATES.has(plc.state) && plc.state_entered_at != null);
 
   let timeText = $derived(
@@ -33,7 +34,7 @@
 
 <tr class:offline={!plc.is_online}>
   <td class="unit">{unitLabel}</td>
-  <td class="status"><span class="dot" class:blocked={isBlocked} style={dotStyle}></span>{label}</td>
+  <td class="status"><span class="dot" class:blocked={isBlocked} class:light-border={isLightBorder} style={dotStyle}></span>{label}</td>
   <td class="time">{timeText}</td>
   <td class="recipe">{recipeText}</td>
   <td class="temperature">{temperatureText}</td>
@@ -74,6 +75,12 @@
     height: 0.7em;
     border-radius: 50%;
     margin-right: 0.5em;
+  }
+
+  /* Standby (no temperature) / Unknown: same lighter ring as their tile. */
+  .dot.light-border {
+    outline: 2px solid var(--state-standby-border);
+    outline-offset: 1px;
   }
 
   .dot.blocked {

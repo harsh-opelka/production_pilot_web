@@ -31,10 +31,10 @@
 
 <header class="topbar">
   <div class="next-action">
-    <div class="next-action-box tier-{nextAction.tier}" class:all-baking={nextAction.allBaking}>
+    <div class="next-action-box tier-{nextAction.tier}" class:all-baking={nextAction.nothingToDo}>
       <span class="na-label">{translate($lang, 'next_action_prefix')}</span>
-      {#if nextAction.allBaking}
-        <!-- Every online machine is baking: a smiley instead of the dash.
+      {#if nextAction.nothingToDo}
+        <!-- Nothing to do right now: a smiley instead of the dash.
              Inline SVG rather than an emoji — the Jetson may have no emoji
              font. 1em square, so it matches the banner text size. -->
         <span class="na-content">
@@ -42,7 +42,7 @@
             class="smiley"
             viewBox="0 0 24 24"
             role="img"
-            aria-label={translate($lang, 'next_action_all_baking')}
+            aria-label={translate($lang, 'next_action_nothing_to_do')}
           >
             <circle cx="12" cy="12" r="11" fill="#facc15" stroke="#a16207" stroke-width="1" />
             <circle cx="8.5" cy="9.5" r="1.5" fill="#1c1c1c" />
@@ -176,12 +176,9 @@
     background: var(--state-error);
   }
 
-  /* Same yellow as the "Fast fertig"/"Almost finished" tile override
+  /* Same purple as the "Fast fertig"/"Almost finished" tile override
      (see FryerTile.svelte / app.css's --state-near-completion) — reused
-     exactly, not a second yellow, so the pill and the tile it's
-     summarizing always match. Needs its own dark text colour, same
-     reasoning as Heating's dark-on-amber: white text on such a bright
-     yellow doesn't have enough contrast. */
+     exactly, so the pill and the tile it's summarizing always match. */
   .tier-near-completion {
     background: var(--state-near-completion);
     color: var(--state-near-completion-fg);
@@ -198,9 +195,17 @@
     color: var(--state-waiting-fg);
   }
 
+  /* "Switch to Auto" takes the chosen machine's tile colour: Hot's yellow
+     with dark text, or (.tier-cold) Cold's grey with light text — also
+     used for plain Standby. */
   .tier-hot {
     background: var(--state-hot);
     color: var(--state-hot-fg);
+  }
+
+  .tier-cold {
+    background: var(--state-cold);
+    color: var(--state-cold-fg);
   }
 
   .tier-none {

@@ -42,7 +42,7 @@ RECIPE_OPTIONS = ("Quarkballs", "Berliners", "Donuts", "Apfelschnenken")
 _DEMO_TARGET_TEMP = 180.0
 _DEMO_COLD_TEMP = 22.0
 _DEMO_HEAT_RATE = 3.0   # °C per second while HEATING
-_DEMO_COOL_RATE = 0.5   # °C per second while COLD
+_DEMO_COOL_RATE = 0.5   # °C per second while STANDBY
 
 _DEFAULT_GROUP_NAME = "Demo Station"
 _DEFAULT_GROUP_TYPE = "QUATTRO"
@@ -172,13 +172,13 @@ class SimulatedSource:
     @staticmethod
     def _tick_temperature(plc: PlcData, elapsed: float) -> None:
         """Demo-only oil temperature: cools towards room temperature while
-        COLD (0.5 °C/s, so a Cold-reported machine visibly goes from Hot to
+        STANDBY (0.5 °C/s, so a Standby machine visibly goes from Hot to
         Cold across the threshold — see hot_cold.py), climbs to the target
         while HEATING, and otherwise holds its value — so a temperature set
         from Demo Controls sticks instead of snapping back."""
         current = plc.oil_temp_current if plc.oil_temp_current is not None else _DEMO_COLD_TEMP
         target = _DEMO_TARGET_TEMP
-        if plc.state == MachineState.COLD:
+        if plc.state == MachineState.STANDBY:
             current = max(_DEMO_COLD_TEMP, current - _DEMO_COOL_RATE * elapsed)
         elif plc.state == MachineState.HEATING:
             current = min(target, current + _DEMO_HEAT_RATE * elapsed)

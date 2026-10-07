@@ -27,8 +27,8 @@
   }
 
   // Every observed-time bucket from stats._SECONDS_KEYS — the productivity
-  // denominator (Hot and Blocked count as available time for now, same as
-  // the backend's shared stats.productivity_pct).
+  // denominator (Hot, Standby and Blocked count as available time for now,
+  // same as the backend's shared stats.productivity_pct).
   const TRACKED_KEYS = [
     'baking_seconds',
     'waiting_seconds',
@@ -37,6 +37,7 @@
     'blocked_seconds',
     'error_seconds',
     'cold_seconds',
+    'standby_seconds',
     'offline_seconds',
   ];
 
@@ -371,6 +372,8 @@
     { key: 'error_seconds', labelKey: 'stats_col_error', kind: 'duration' },
     { key: 'error_count', labelKey: 'stats_col_error_count', kind: 'count' },
     { key: 'cold_seconds', labelKey: 'stats_col_cold', kind: 'duration' },
+    // Standby with an unreadable oil temperature — usually 0:00.
+    { key: 'standby_seconds', labelKey: 'stats_col_standby', kind: 'duration' },
     { key: 'offline_seconds', labelKey: 'stats_col_offline', kind: 'duration' },
     // UNKNOWN/SERVER_STOPPED marker spans — server downtime, not machine time.
     { key: 'untracked_seconds', labelKey: 'stats_col_no_data', kind: 'duration' },

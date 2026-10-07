@@ -36,8 +36,8 @@ from pydantic import BaseModel
 
 from production_pilot import exports, history, hot_cold, layout, plc_config, scan_plcs, service_config, stats
 from production_pilot.demo_source import RECIPE_OPTIONS, SimulatedSource
-from production_pilot.models import MachineGroup, MachineState
-from production_pilot.opcua_source import CONFIG_PATH, OpcUaSource
+from production_pilot.models import MachineGroup
+from production_pilot.opcua_source import CONFIG_PATH, PLC_STATE_MAP, OpcUaSource
 from production_pilot.serializers import build_state
 
 POLL_INTERVAL_SECONDS = 0.5
@@ -260,7 +260,7 @@ def _detect_and_log_transitions(groups: list[MachineGroup]) -> None:
             plc.state_entered_at = _state_entered_at.get(plc.ip)
 
 
-# Hot vs Cold from the oil temperature — applied to every poll HERE, before
+# Standby -> Cold / Hot from the oil temperature — applied to every poll HERE, before
 # transition detection, so history and everything downstream share one
 # derived state (see production_pilot/hot_cold.py). Poll thread only.
 _hot_cold_rule = hot_cold.HotColdRule()
@@ -268,7 +268,7 @@ _hot_cold_rule = hot_cold.HotColdRule()
 
 def _process_poll(groups: list[MachineGroup]) -> list[MachineGroup]:
     """One poll's raw source groups -> the derived groups everything else
-    sees: Hot/Cold rule first, then transition detection/history logging."""
+    sees: Standby Cold/Hot rule first, then transition detection/history logging."""
     groups = _hot_cold_rule.apply(groups, history.get_hot_cold_threshold_c())
     _detect_and_log_transitions(groups)
     return groups
@@ -912,7 +912,10 @@ def service_history_summary(_token: str = Depends(require_level("service"))) -> 
 # ---------------------------------------------------------------------------
 
 _VALID_DATA_SOURCE_MODES = {"real", "demo"}
-_VALID_MACHINE_STATE_NAMES = {s.name for s in MachineState}
+# Demo Controls set the RAW PLC state, so only states a PLC can actually
+# report — Cold / Hot follow from Standby + the demo temperature
+# (hot_cold.py), and Unknown is never a real PLC value.
+_VALID_MACHINE_STATE_NAMES = {s.name for s in PLC_STATE_MAP.values()}
 
 
 @app.get("/api/service/data-source")

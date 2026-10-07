@@ -11,8 +11,8 @@ PLC must not stall the other PLCs' reads or the poll loop itself.
 
 Node IDs (confirmed identical on every connected PLC, Tim), all in
 namespace _NAMESPACE_INDEX as string node ids:
-    state:           "::auto:external_machine_state"  -> int 0..6, see
-                      models.OPCUA_STATE_MAP for the value mapping
+    state:           "::auto:external_machine_state"  -> int 0..5, see
+                      PLC_STATE_MAP below for the value mapping
     remaining time:  "::auto:ActRestzeitGes"           -> int seconds,
                       no scaling conversion needed
   Optional (a failed read never takes the PLC offline — see _OPTIONAL_NODES):
@@ -34,7 +34,7 @@ except ImportError:
     print("Missing dependency. Install it with:\n  pip install opcua --break-system-packages")
     sys.exit(1)
 
-from .models import MachineGroup, MachineState, OPCUA_STATE_MAP, PlcData
+from .models import MachineGroup, MachineState, PlcData
 from .plc_config import load_config
 
 CONFIG_PATH = Path(__file__).resolve().parent / "plc_config.json"
@@ -47,6 +47,38 @@ _REMAINING_TIME_NODE_ID = "::auto:ActRestzeitGes"
 _OIL_TEMP_CURRENT_NODE_ID = "::tempregl:ActOilTemp"
 _OIL_TEMP_TARGET_NODE_ID = "::AsGlobalPV:gFormatSet.BackTemperatur"
 _RECIPE_NAME_NODE_ID = "::AsGlobalPV:gFormatVerwaltung.ActFormatName"
+
+# Raw value of _STATE_NODE_ID -> MachineState. The ONE place that knows
+# the PLC's numbers (state mapping v3, Tim) — everything else, including
+# history.db (which stores MachineState NAMES), only sees MachineState.
+# Cold/Hot are not PLC values any more: hot_cold.py derives them from
+# STANDBY + oil temperature.
+PLC_STATE_MAP: dict[int, MachineState] = {
+    0: MachineState.ERROR,
+    1: MachineState.STANDBY,   # NOT in auto mode
+    2: MachineState.HEATING,
+    3: MachineState.WAITING,
+    4: MachineState.BLOCKED,   # waiting for another machine
+    5: MachineState.BAKING,
+}
+
+# Raw values already warned about — one warning per distinct value for the
+# lifetime of the process, not one per poll.
+_warned_state_values: set = set()
+
+
+def state_from_plc_value(value) -> MachineState:
+    """PLC_STATE_MAP lookup. Anything else (an int outside the map, a
+    negative, a non-integer, None) is MachineState.UNRECOGNIZED — never an
+    exception, so an unexpected value can't take the PLC offline."""
+    if isinstance(value, int) and not isinstance(value, bool) and value in PLC_STATE_MAP:
+        return PLC_STATE_MAP[value]
+    key = repr(value)
+    if key not in _warned_state_values:
+        _warned_state_values.add(key)
+        print(f"[opcua] unrecognized machine state value {key} — showing it as Unknown")
+    return MachineState.UNRECOGNIZED
+
 
 # B&R Automation Studio auto-exported OPC UA globals (the "::auto:" prefix)
 # live in this namespace on Opelka's PLCs.
@@ -146,9 +178,10 @@ class _PlcConnection:
     def read(self) -> PlcReading | None:
         """
         Returns a PlcReading on success, or None if the PLC is
-        unreachable, the connection fails, or the state node doesn't
-        return a value in OPCUA_STATE_MAP. Never raises. Only the state
-        and remaining-time nodes decide online/offline; the optional
+        unreachable or the connection fails. Never raises. An unexpected
+        state VALUE is not a failure: it reads as UNRECOGNIZED (see
+        state_from_plc_value) and the PLC stays online. Only the state
+        and remaining-time reads decide online/offline; the optional
         nodes (temperatures, recipe) just come back as None when they
         can't be read.
         """
@@ -156,16 +189,13 @@ class _PlcConnection:
             if self._client is None:
                 self._connect()
 
-            state_value = self._client.get_node(_node_id(_STATE_NODE_ID)).get_value()
-            state = OPCUA_STATE_MAP.get(int(state_value))
-            if state is None:
-                raise ValueError(f"unrecognized machine state {state_value!r}")
+            state = state_from_plc_value(self._client.get_node(_node_id(_STATE_NODE_ID)).get_value())
 
             remaining_value = self._client.get_node(_node_id(_REMAINING_TIME_NODE_ID)).get_value()
             remaining_seconds = int(remaining_value) if remaining_value is not None else None
         except Exception:
-            # Covers unreachable host, failed/expired session, and a
-            # malformed state value alike — don't guess, just go offline
+            # Covers unreachable host and failed/expired session alike —
+            # don't guess, just go offline
             # and let the next poll's lazy _connect() retry from scratch.
             self._drop()
             return None
@@ -215,7 +245,7 @@ class OpcUaSource:
                 plcs.append(PlcData(
                     ip=ip,
                     name=f"PLC {index + 1}",
-                    state=MachineState.COLD,
+                    state=MachineState.STANDBY,
                     is_online=False,
                     default_priority=index,
                     unit_number=entry["unit_number"],

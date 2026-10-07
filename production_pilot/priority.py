@@ -17,15 +17,24 @@ from .models import MachineState, PlcData
 
 NEAR_COMPLETION_THRESHOLD_SECONDS = 30
 
+#: A Waiting machine is only a "Load Machine" candidate while no machine in
+#: its OWN machine group is Heating (a Heating machine in another group
+#: doesn't block). Set to False to drop the rule.
+LOAD_BLOCKED_WHILE_GROUP_HEATING = True
+
 # Next Action kinds, highest precedence first. The frontend maps each one
 # to its translated "<no>: ..." text and banner colour (nextAction.js).
 ACTION_ERROR = "error"                  # "<no>: Check Error"
-ACTION_SWITCH_TO_AUTO = "switch_to_auto"  # "<no>: Switch to Auto" (HOT)
+ACTION_SWITCH_TO_AUTO = "switch_to_auto"  # "<no>: Switch to Auto" (Standby: shown as Cold, Hot or Standby)
 ACTION_LOAD = "load"                    # "<no>: Load Machine"   (WAITING)
 ACTION_UNLOAD_SOON = "unload_soon"      # "<no>: Unload Soon"    (Almost finished)
 # Nothing actionable:
-ACTION_ALL_BAKING = "all_baking"        # every online machine is Baking -> smiley
-ACTION_NONE = "none"                    # anything else (heating, cold, blocked, offline...)
+ACTION_NOTHING_TO_DO = "nothing_to_do"  # machines online, nothing to do right now -> smiley
+ACTION_NONE = "none"                    # no online machine at all -> dash
+
+# Standby and its two temperature proxies (hot_cold.py) — the machine is
+# not in auto mode, so it has to be switched before it can bake.
+_NOT_IN_AUTO = (MachineState.STANDBY, MachineState.COLD, MachineState.HOT)
 
 
 def is_near_completion(plc: PlcData) -> bool:
@@ -43,12 +52,13 @@ def is_near_completion(plc: PlcData) -> bool:
 
 def _action_kind(plc: PlcData) -> str | None:
     """The actionable category of one PLC, or None if there's nothing to
-    do at it right now (Blocked, Baking >= threshold, Heating, Cold, Offline)."""
+    do at it right now (Blocked, Baking >= threshold, Heating, Unknown,
+    Offline)."""
     if not plc.is_online:
         return None
     if plc.state == MachineState.ERROR:
         return ACTION_ERROR
-    if plc.state == MachineState.HOT:
+    if plc.state in _NOT_IN_AUTO:
         return ACTION_SWITCH_TO_AUTO
     if plc.state == MachineState.WAITING:
         return ACTION_LOAD
@@ -66,30 +76,47 @@ _TIERS = (
 )
 
 
-def select_next_action(plcs: list[PlcData]) -> dict:
+def select_next_action(plcs: list[PlcData], group_by_ip: dict[str, str] | None = None) -> dict:
     """
     `plcs` must be in saved priority order: groups in plc_config.json
     order, each group's PLCs in their saved order (default_priority).
+    `group_by_ip` maps each PLC's ip to its machine group name; without
+    it, all of `plcs` count as one group.
 
-    Tier precedence beats saved order: Error ("Check Error"), then Hot
-    ("Switch to Auto"), then Waiting ("Load Machine"), then Almost
-    finished ("Unload Soon"). Within a tier, the PLC earliest in `plcs`
-    wins — so a Hot machine beats every Waiting machine, even one ranked
-    higher in the saved order, and of several Hot machines the
-    highest-ranked one is next.
+    Tier precedence beats saved order: Error ("Check Error"), then
+    Standby — shown as Cold, Hot or Standby — ("Switch to Auto"), then
+    Waiting ("Load Machine"), then Almost finished ("Unload Soon"). Within
+    a tier, the PLC earliest in `plcs` wins — so a Standby machine beats
+    every Waiting machine, even one ranked higher in the saved order, and
+    of several Standby machines the highest-ranked one is next.
 
-    Returns {"kind", "ip", "unit_number"}. When nothing is actionable,
-    kind is ACTION_ALL_BAKING if there is at least one online machine and
-    every online machine is Baking, otherwise ACTION_NONE; ip and
-    unit_number are None in both cases.
+    LOAD_BLOCKED_WHILE_GROUP_HEATING: a Waiting machine whose group has an
+    online Heating machine is skipped, as if it had nothing to do.
+
+    Returns {"kind", "ip", "unit_number", "state"} — state is the chosen
+    PLC's (derived) MachineState name, which the frontend colours the
+    banner / NEXT badge by. When nothing is actionable, kind is
+    ACTION_NOTHING_TO_DO (the smiley banner) if at least one machine is
+    online, otherwise ACTION_NONE; ip, unit_number and state are None
+    in both cases.
     """
-    kinds = [(plc, _action_kind(plc)) for plc in plcs]
+    group_of = (lambda plc: group_by_ip.get(plc.ip)) if group_by_ip is not None else (lambda plc: None)
+    heating_groups = {
+        group_of(plc) for plc in plcs if plc.is_online and plc.state == MachineState.HEATING
+    }
+
+    def kind_of(plc: PlcData) -> str | None:
+        kind = _action_kind(plc)
+        if kind == ACTION_LOAD and LOAD_BLOCKED_WHILE_GROUP_HEATING and group_of(plc) in heating_groups:
+            return None
+        return kind
+
+    kinds = [(plc, kind_of(plc)) for plc in plcs]
     for tier in _TIERS:
         for plc, kind in kinds:
             if kind in tier:
-                return {"kind": kind, "ip": plc.ip, "unit_number": plc.unit_number}
+                return {"kind": kind, "ip": plc.ip, "unit_number": plc.unit_number, "state": plc.state.name}
 
-    online = [plc for plc in plcs if plc.is_online]
-    if online and all(plc.state == MachineState.BAKING for plc in online):
-        return {"kind": ACTION_ALL_BAKING, "ip": None, "unit_number": None}
-    return {"kind": ACTION_NONE, "ip": None, "unit_number": None}
+    if any(plc.is_online for plc in plcs):
+        return {"kind": ACTION_NOTHING_TO_DO, "ip": None, "unit_number": None, "state": None}
+    return {"kind": ACTION_NONE, "ip": None, "unit_number": None, "state": None}

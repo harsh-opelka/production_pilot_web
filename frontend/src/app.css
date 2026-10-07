@@ -23,12 +23,20 @@
      app background. */
   --state-cold: #6b7280;
   --state-cold-fg: #ffffff;
+  /* Standby with no readable oil temperature, and Unknown (unexpected PLC
+     value): Cold's grey, told apart by a lighter border
+     (--state-standby-border, see FryerTile.svelte's .light-border). */
+  --state-standby: var(--state-cold);
+  --state-standby-fg: var(--state-cold-fg);
+  --state-standby-border: #d1d5db;
+  --state-unrecognized: var(--state-standby);
+  --state-unrecognized-fg: var(--state-standby-fg);
   --state-heating: #f59e0b;
   --state-heating-fg: #1c1c1c;
-  /* Hot = hot but NOT in auto mode. Purple, clearly apart from Heating's
-     amber and Cold's grey. */
-  --state-hot: #9333ea;
-  --state-hot-fg: #ffffff;
+  /* Hot = Standby (NOT in auto mode) with hot oil. Bright yellow with dark
+     text (13:1). */
+  --state-hot: #facc15;
+  --state-hot-fg: #1c1c1c;
   --state-waiting: var(--opelka-blue);
   --state-waiting-fg: var(--opelka-blue-fg);
   /* Blocked = waiting for another machine. Dark grey-blue slate, always
@@ -44,13 +52,11 @@
 
   /* "Fast fertig"/"Almost finished" display override (BAKING with
      remaining_seconds below the near-completion threshold — see
-     priority.is_near_completion). Its own bright, saturated warning
-     yellow, deliberately NOT --state-heating's amber-orange, so the two
-     read as clearly different states at a glance in FryerTile.svelte /
-     MachineListRow.svelte. MachineState itself stays BAKING; this is a
-     display-only colour, never sent as a machine state. */
-  --state-near-completion: #facc15;
-  --state-near-completion-fg: #1c1c1c;
+     priority.is_near_completion). Purple with white text (5.4:1).
+     MachineState itself stays BAKING; this is a display-only colour,
+     never sent as a machine state. */
+  --state-near-completion: #9333ea;
+  --state-near-completion-fg: #ffffff;
 
   --offline-bg: #374151;
   --offline-fg: #e5e7eb;
@@ -125,7 +131,7 @@
      text at 9.4:1 and stands clearly apart from the dark page. */
   --heating-empty-bg: #b6c2d1;
   --heating-empty-border: #64748b;
-  /* Next Action banner when every machine is baking (TopBar.svelte). */
+  /* Next Action smiley banner — nothing to do right now (TopBar.svelte). */
   --banner-all-baking-bg: #1e293b;
   --banner-all-baking-fg: var(--text-primary);
   --bg-app: #0f172a;

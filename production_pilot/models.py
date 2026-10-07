@@ -4,13 +4,27 @@ from enum import Enum
 
 
 class MachineState(Enum):
+    """history.db stores these NAMES (state_transitions.new_state/old_state
+    are TEXT), so a member must never be renamed without a migration —
+    see history.migrate_state_mapping. Which raw PLC value maps to which
+    member lives in opcua_source.PLC_STATE_MAP."""
     ERROR   = "Error"
+    # Cold / Hot are PROXY states of STANDBY, derived from the oil
+    # temperature (hot_cold.py) — the PLC never reports them itself.
     COLD    = "Cold"
     HOT     = "Hot"       # hot, but NOT in auto mode — needs switching to auto
     HEATING = "Heating"
     WAITING = "Waiting"   # empty and ready to load (called READY before state mapping v2)
     BLOCKED = "Blocked"   # waiting for another machine — nothing to do here
     BAKING  = "Baking"
+    # Raw PLC state: NOT in auto mode. Only ever shown as itself when the
+    # oil temperature is unreadable; otherwise hot_cold.py turns it into
+    # COLD or HOT.
+    STANDBY = "Standby"
+    # The PLC sent a value outside PLC_STATE_MAP. Shown as "Unknown", but
+    # deliberately NOT named UNKNOWN: that name is already taken in
+    # state_transitions by history.UNKNOWN_MARKER (server-startup marker).
+    UNRECOGNIZED = "Unknown"
 
 
 # V1 (Qt) colour table — not read by the V2 web UI, whose single source
@@ -22,11 +36,13 @@ class MachineState(Enum):
 STATE_COLORS: dict[MachineState, dict[str, str]] = {
     MachineState.ERROR:   {"bg": "#DC2626", "fg": "#FFFFFF"},  # Red
     MachineState.COLD:    {"bg": "#6B7280", "fg": "#FFFFFF"},  # Grey
-    MachineState.HOT:     {"bg": "#9333EA", "fg": "#FFFFFF"},  # Purple
+    MachineState.HOT:     {"bg": "#FACC15", "fg": "#1C1C1C"},  # Yellow
     MachineState.HEATING: {"bg": "#F59E0B", "fg": "#1C1C1C"},  # Amber
     MachineState.WAITING: {"bg": "#05346C", "fg": "#FFFFFF"},  # Opelka blue — call to action
     MachineState.BLOCKED: {"bg": "#334E68", "fg": "#FFFFFF"},  # Slate, dashed border in the UI
     MachineState.BAKING:  {"bg": "#16A34A", "fg": "#FFFFFF"},  # Green — process running
+    MachineState.STANDBY: {"bg": "#6B7280", "fg": "#FFFFFF"},  # Cold's grey, lighter border in the UI
+    MachineState.UNRECOGNIZED: {"bg": "#6B7280", "fg": "#FFFFFF"},  # same as Standby
 }
 
 # Describes the visual treatment for an offline PLC: a neutral dark grey
@@ -40,23 +56,6 @@ OFFLINE_STYLE: dict[str, object] = {
     "border_color": "#94A3B8",
     "background_color": "#374151",
     "text_color": "#E5E7EB",
-}
-
-
-# Maps the integer value of the "::auto:external_machine_state" OPC UA
-# node (identical on every PLC) to MachineState. State mapping v2 (Tim):
-# 0..6 below REPLACES the old 0 Error / 1 Cold / 2 Heating / 3 Ready /
-# 4 Baking mapping. history.db stores state NAMES, not these integers —
-# see history.migrate_state_mapping for the matching READY -> WAITING
-# rename of old rows.
-OPCUA_STATE_MAP: dict[int, MachineState] = {
-    0: MachineState.ERROR,
-    1: MachineState.COLD,
-    2: MachineState.HOT,
-    3: MachineState.HEATING,
-    4: MachineState.WAITING,
-    5: MachineState.BLOCKED,
-    6: MachineState.BAKING,
 }
 
 

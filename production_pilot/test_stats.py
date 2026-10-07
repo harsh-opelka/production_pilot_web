@@ -326,9 +326,11 @@ def test_compute_totals() -> list[bool]:
 
     machines = [
         {"baking_seconds": 3600, "waiting_seconds": 3600, "heating_seconds": 0, "hot_seconds": 0,
-         "blocked_seconds": 0, "error_seconds": 0, "cold_seconds": 0, "offline_seconds": 0, "error_count": 1},
+         "blocked_seconds": 0, "error_seconds": 0, "cold_seconds": 0, "standby_seconds": 0, "offline_seconds": 0,
+         "error_count": 1},
         {"baking_seconds": 1800, "waiting_seconds": 0, "heating_seconds": 1800, "hot_seconds": 0,
-         "blocked_seconds": 0, "error_seconds": 3600, "cold_seconds": 0, "offline_seconds": 0, "error_count": 2},
+         "blocked_seconds": 0, "error_seconds": 3600, "cold_seconds": 0, "standby_seconds": 0, "offline_seconds": 0,
+         "error_count": 2},
     ]
     totals = stats.compute_totals(machines)
     results.append(_check("baking_seconds == 5400 (summed across machines)", totals["baking_seconds"], 5400))
@@ -474,6 +476,56 @@ def test_hot_and_blocked() -> list[bool]:
     return results
 
 
+def test_standby_and_old_rows() -> list[bool]:
+    print()
+    print("--- state mapping v3: old rows keep their meaning, Standby column, Unknown ---")
+    from . import exports
+    from .models import MachineState
+
+    _fresh_db()
+    results = []
+    start = history.local_day_start_utc(DAY2)
+
+    # Rows exactly as the previous version wrote them (derived COLD/HOT,
+    # BAKING), mixed with the new STANDBY / UNRECOGNIZED names.
+    with sqlite3.connect(history.DB_PATH) as conn:
+        _insert(conn, timestamp=_ts(start, hours=6), old_state=None, new_state="COLD")
+        _insert(conn, timestamp=_ts(start, hours=7), old_state="COLD", new_state="HOT")
+        _insert(conn, timestamp=_ts(start, hours=8), old_state="HOT", new_state="BAKING")
+        _insert(conn, timestamp=_ts(start, hours=10), old_state="BAKING", new_state="STANDBY")
+        _insert(conn, timestamp=_ts(start, hours=11), old_state="STANDBY", new_state="UNRECOGNIZED")
+        _insert(conn, timestamp=_ts(start, hours=12), old_state="UNRECOGNIZED", new_state="BAKING")
+        _insert(conn, timestamp=_ts(start, hours=14), old_state="BAKING", new_state="COLD")
+        conn.commit()
+
+    results.append(_check("every stored state name is still a MachineState (or a server marker)",
+                          {n for _, n in _states_in_db()} - set(MachineState.__members__) - history.UNTRACKED_STATES,
+                          set()))
+    results.append(_check("old COLD / HOT / BAKING rows read as Cold / Hot / Baking",
+                          [MachineState[n].value for n in ("COLD", "HOT", "BAKING")], ["Cold", "Hot", "Baking"]))
+    results.append(_check("the Unknown machine state is not stored as the UNKNOWN server marker",
+                          MachineState.UNRECOGNIZED.name != history.UNKNOWN_MARKER, True))
+
+    m = _machine(stats.compute_daily_summary(DAY2))
+    results.append(_check("cold 1h + 10h, hot 1h, baking 4h, standby 1h (old rows + new Standby)",
+                          (m["cold_seconds"], m["hot_seconds"], m["baking_seconds"], m["standby_seconds"]),
+                          (11 * 3600, 3600, 4 * 3600, 3600)))
+    # Observed 06:00 -> 24:00 = 18h, minus the Unknown hour = 17h; baking 4h.
+    results.append(_check("Unknown time is in no column and not in the denominator (4h / 17h = 23.5%)",
+                          m["productivity_pct"], 23.5))
+
+    results.append(_check("exports: Standby column right after Cold",
+                          exports.HEADERS[exports.HEADERS.index("Cold") + 1], "Standby"))
+    summary = stats.with_all_configured_machines(stats.compute_daily_summary(DAY2))
+    row = next(r for r in exports._table(summary) if r[0] == GROUP_NAME)
+    results.append(_check("exports: Standby value 1h 0m", row[exports.HEADERS.index("Standby")], "1h 0m"))
+    results.append(_check("exports: CSV/PDF build with the extra column",
+                          ("Standby" in exports.to_csv(summary).splitlines()[0],
+                           exports.to_pdf(summary, stats.compute_totals(summary["machines"]), 70, None)[:4]),
+                          (True, b"%PDF")))
+    return results
+
+
 def _legacy_db_with_rows(rows: list[tuple[str | None, str]]) -> None:
     """A throwaway DB as written BEFORE state mapping v2: tables exist,
     rows use the old READY name, no state_mapping_version flag yet."""
@@ -538,6 +590,7 @@ def main() -> bool:
         test_compute_seven_day_average,
         test_compute_timeline,
         test_hot_and_blocked,
+        test_standby_and_old_rows,
         test_state_mapping_migration,
     ):
         results.extend(scenario())

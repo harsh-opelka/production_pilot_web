@@ -1,6 +1,6 @@
 <script>
   // Service-only card (see ServiceHome.svelte's "Data" section). The oil
-  // temperature at which an idle machine counts as Hot rather than Cold —
+  // temperature at which a Standby machine counts as Hot rather than Cold —
   // applied by the backend's poll loop (production_pilot/hot_cold.py) from
   // the next poll on. GET/PUT /api/service/hot-cold-threshold.
   import { onMount } from 'svelte';
