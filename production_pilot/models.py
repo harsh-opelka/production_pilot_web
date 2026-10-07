@@ -28,26 +28,14 @@ class MachineState(Enum):
     UNRECOGNIZED = "Unknown"
 
 
-# V1 (Qt) colour table — not read by the V2 web UI, whose single source
-# of truth for state colours is frontend/src/app.css (--state-* tokens).
-# Kept in step with those tokens so the two never disagree.
+# State colours are NOT defined here: they are Service-configurable, with
+# their defaults in state_colors.DEFAULT_STATE_COLORS (the one place).
 # OFFLINE is not a state (see PlcData.is_online); it's a connection
 # condition that can co-occur with any of the states above, rendered via
 # OFFLINE_STYLE instead of a state color.
-STATE_COLORS: dict[MachineState, dict[str, str]] = {
-    MachineState.ERROR:   {"bg": "#DC2626", "fg": "#FFFFFF"},  # Red
-    MachineState.COLD:    {"bg": "#6B7280", "fg": "#FFFFFF"},  # Grey
-    MachineState.HOT:     {"bg": "#FACC15", "fg": "#1C1C1C"},  # Yellow
-    MachineState.HEATING: {"bg": "#F59E0B", "fg": "#1C1C1C"},  # Amber
-    MachineState.WAITING: {"bg": "#05346C", "fg": "#FFFFFF"},  # Opelka blue — call to action
-    MachineState.BLOCKED: {"bg": "#334E68", "fg": "#FFFFFF"},  # Slate, dashed border in the UI
-    MachineState.BAKING:  {"bg": "#16A34A", "fg": "#FFFFFF"},  # Green — process running
-    MachineState.STANDBY: {"bg": "#6B7280", "fg": "#FFFFFF"},  # Cold's grey, lighter border in the UI
-    MachineState.UNRECOGNIZED: {"bg": "#6B7280", "fg": "#FFFFFF"},  # same as Standby
-}
 
 # Describes the visual treatment for an offline PLC: a neutral dark grey
-# box (deliberately NOT one of STATE_COLORS — the last-known state is not
+# box (deliberately NOT a state colour — the last-known state is not
 # shown while offline, since we don't actually know it's still true),
 # dimmed further and dashed-outlined so it's unmistakably distinct from
 # the solid-grey Cold state.

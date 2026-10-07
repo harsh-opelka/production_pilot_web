@@ -1,5 +1,5 @@
 <script>
-  import { page, lang, auth } from './stores.js';
+  import { page, lang, auth, navigateTo, confirmLeave } from './stores.js';
   import { translate } from './translations.js';
   import { logout } from './serviceApi.js';
 </script>
@@ -7,25 +7,25 @@
 <nav class="sidebar">
   <ul class="nav">
     <li>
-      <button class:active={$page === 'dashboard'} onclick={() => page.set('dashboard')}>
+      <button class:active={$page === 'dashboard'} onclick={() => navigateTo('dashboard')}>
         {translate($lang, 'nav_dashboard')}
       </button>
     </li>
     <li>
-      <button class:active={$page === 'statistics'} onclick={() => page.set('statistics')}>
+      <button class:active={$page === 'statistics'} onclick={() => navigateTo('statistics')}>
         {translate($lang, 'nav_statistics')}
       </button>
     </li>
     {#if $auth.level === 'service'}
       <li>
-        <button class:active={$page === 'service'} onclick={() => page.set('service')}>
+        <button class:active={$page === 'service'} onclick={() => navigateTo('service')}>
           {translate($lang, 'nav_service')}
         </button>
       </li>
     {/if}
     {#if $auth.level === 'service' || $auth.level === 'management'}
       <li>
-        <button class:active={$page === 'settings'} onclick={() => page.set('settings')}>
+        <button class:active={$page === 'settings'} onclick={() => navigateTo('settings')}>
           {translate($lang, 'nav_settings')}
         </button>
       </li>
@@ -33,7 +33,7 @@
   </ul>
 
   <div class="bottom">
-    <button class="toggle" onclick={logout}>
+    <button class="toggle" onclick={() => confirmLeave() && logout()}>
       {translate($lang, 'logout')}
     </button>
   </div>

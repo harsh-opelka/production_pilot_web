@@ -34,7 +34,7 @@ from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request, Resp
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from production_pilot import exports, history, hot_cold, layout, plc_config, scan_plcs, service_config, stats
+from production_pilot import exports, history, hot_cold, layout, plc_config, scan_plcs, service_config, state_colors, stats
 from production_pilot.demo_source import RECIPE_OPTIONS, SimulatedSource
 from production_pilot.models import MachineGroup
 from production_pilot.opcua_source import CONFIG_PATH, PLC_STATE_MAP, OpcUaSource
@@ -82,6 +82,17 @@ def _set_state(new_state: dict) -> None:
     global _state
     with _state_lock:
         _state = new_state
+
+
+def _current_state_colors() -> dict:
+    return state_colors.merge_with_defaults(history.get_saved_state_colors())
+
+
+def _public_state() -> dict:
+    """The state as sent to clients (REST + WS): plus colors_version, so an
+    open dashboard re-fetches /api/state-colors when a technician changes
+    them — no reload needed on the TV."""
+    return {**get_state(), "colors_version": state_colors.colors_version(_current_state_colors())}
 
 
 def _load_source() -> OpcUaSource | None:
@@ -327,7 +338,7 @@ async def _broadcast_loop() -> None:
     """
     Polls the shared state at the same cadence it's produced, pushes a
     "state" message to every connected client whenever the actual data
-    (groups/connected) changes, and otherwise sends a lightweight
+    (groups/connected/colors_version) changes, and otherwise sends a lightweight
     "heartbeat" every HEARTBEAT_INTERVAL_SECONDS so clients can tell a
     silent connection from a dead one. Timestamp is excluded from the
     change check — it ticks every poll regardless, and shouldn't by
@@ -340,9 +351,9 @@ async def _broadcast_loop() -> None:
         if not _clients:
             continue
 
-        state = get_state()
+        state = _public_state()
         content_key = json.dumps(
-            {"connected": state["connected"], "groups": state["groups"]},
+            {"connected": state["connected"], "groups": state["groups"], "colors_version": state["colors_version"]},
             sort_keys=True,
         )
         now = time.monotonic()
@@ -602,7 +613,7 @@ def health() -> dict:
 
 @app.get("/api/machines")
 def get_machines() -> dict:
-    return get_state()
+    return _public_state()
 
 
 @app.get("/api/stats/today-totals")
@@ -618,7 +629,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
     _clients.add(websocket)
     try:
-        await websocket.send_text(json.dumps({"type": "state", **get_state()}))
+        await websocket.send_text(json.dumps({"type": "state", **_public_state()}))
         while True:
             # Frontend never needs to send anything; this just parks the
             # coroutine until the client disconnects.
@@ -791,6 +802,38 @@ def _known_group_names() -> set[str]:
     if history.get_data_source_mode() == "demo":
         names |= {group.name for group in _ensure_demo_source().get_machines()}
     return names
+
+
+def _state_colors_payload() -> dict:
+    colors = _current_state_colors()
+    return {
+        "colors": colors,
+        "defaults": dict(state_colors.DEFAULT_STATE_COLORS),
+        "version": state_colors.colors_version(colors),
+    }
+
+
+@app.get("/api/state-colors")
+def get_state_colors() -> dict:
+    """Readable without a session, like /api/layout — the anonymous
+    dashboard (the TV) needs them. `defaults` lets the Service tab reset
+    a colour without the frontend keeping its own copy."""
+    return _state_colors_payload()
+
+
+@app.put("/api/state-colors")
+def put_state_colors(
+    payload: Any = Body(...), _token: str = Depends(require_level("service"))
+) -> dict:
+    """Replaces the saved colours (keys left out fall back to their
+    default). "Reset all" is a PUT of the defaults — same as the other
+    settings, there is no DELETE."""
+    try:
+        colors = state_colors.validate_update(payload)
+    except state_colors.StateColorsError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    history.set_saved_state_colors(colors)  # broadcast to open dashboards via colors_version
+    return _state_colors_payload()
 
 
 @app.get("/api/layout")

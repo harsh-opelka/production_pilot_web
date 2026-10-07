@@ -1,4 +1,5 @@
 import { machinesState, wsConnected } from './stores.js';
+import { syncStateColors } from './stateColors.js';
 
 const RECONNECT_DELAY_MS = 2000;
 
@@ -15,6 +16,8 @@ function applyState(data) {
     // The backend's Next Action pick (priority.select_next_action) — see nextAction.js.
     next_action: data.next_action,
   });
+  // Service changed the state colours -> pick them up without a reload (the TV).
+  syncStateColors(data.colors_version);
 }
 
 export async function fetchInitialState() {

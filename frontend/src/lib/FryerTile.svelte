@@ -41,7 +41,7 @@
       ? ''
       : fillLevel != null
         ? // Heating with a known level: neutral "empty" tile, orange fill below.
-          '--tile-bg: var(--heating-empty-bg); --tile-fg: var(--state-heating-fg);'
+          '--tile-bg: var(--heating-empty-bg); --tile-fg: var(--heating-level-fg);'
         : `--tile-bg: var(--state-${stateKey}); --tile-fg: var(--state-${stateKey}-fg);`,
   );
 

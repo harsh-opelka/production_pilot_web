@@ -39,6 +39,7 @@ _PRODUCTIVITY_TARGET_KEY = "productivity_target_pct"
 _DEFAULT_PRODUCTIVITY_TARGET_PCT = "70"
 _FLOOR_LAYOUT_KEY = "floor_layout"
 _HOT_COLD_THRESHOLD_KEY = "hot_cold_threshold_c"
+_STATE_COLORS_KEY = "state_colors"
 _DEFAULT_HOT_COLD_THRESHOLD_C = "50"
 _STATE_MAPPING_VERSION_KEY = "state_mapping_version"
 #: Current state-name vocabulary in state_transitions — see
@@ -71,6 +72,7 @@ _recording_enabled = False  # cache; authoritative value lives in app_settings
 _data_source_mode = _DEFAULT_DATA_SOURCE_MODE  # cache; authoritative value lives in app_settings
 _productivity_target_pct = int(_DEFAULT_PRODUCTIVITY_TARGET_PCT)  # cache; authoritative value lives in app_settings
 _hot_cold_threshold_c = float(_DEFAULT_HOT_COLD_THRESHOLD_C)  # cache; read every poll, authoritative value lives in app_settings
+_saved_state_colors: dict | None = None  # cache of the stored state_colors JSON (None = nothing saved); read every broadcast tick
 
 # This PROCESS's own start instant (ISO UTC string, history's fixed-width
 # format) — set once by server.py's lifespan startup handler, live only in
@@ -142,7 +144,7 @@ def init_db() -> None:
     just works. Also primes the in-memory caches from whatever's on disk
     (so a restart resumes whichever state the technician last set). Call
     once at startup."""
-    global _recording_enabled, _data_source_mode, _productivity_target_pct, _hot_cold_threshold_c
+    global _recording_enabled, _data_source_mode, _productivity_target_pct, _hot_cold_threshold_c, _saved_state_colors
     with _db_lock, _connection() as conn:
         conn.execute(
             """
@@ -198,7 +200,19 @@ def init_db() -> None:
             "SELECT value FROM app_settings WHERE key = ?", (_HOT_COLD_THRESHOLD_KEY,)
         ).fetchone()
         _hot_cold_threshold_c = float(row["value"]) if row is not None else float(_DEFAULT_HOT_COLD_THRESHOLD_C)
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = ?", (_STATE_COLORS_KEY,)
+        ).fetchone()
+        _saved_state_colors = _parse_json_object(row["value"]) if row is not None else None
     migrate_state_mapping()
+
+
+def _parse_json_object(text: str) -> dict | None:
+    try:
+        value = json.loads(text)
+    except ValueError:
+        return None
+    return value if isinstance(value, dict) else None
 
 
 def _backup_path() -> Path:
@@ -325,6 +339,28 @@ def set_hot_cold_threshold_c(threshold_c: float) -> None:
             (_HOT_COLD_THRESHOLD_KEY, repr(float(threshold_c))),
         )
     _hot_cold_threshold_c = float(threshold_c)
+
+
+def get_saved_state_colors() -> dict | None:
+    """The stored state_colors JSON as saved (None = nothing saved) — merge
+    it with the defaults via state_colors.merge_with_defaults. In-memory
+    cache: the WS broadcast loop fingerprints it every tick."""
+    return dict(_saved_state_colors) if _saved_state_colors is not None else None
+
+
+def set_saved_state_colors(colors: dict) -> None:
+    """Caller is expected to have already validated `colors` (see
+    state_colors.validate_update) — this always writes what it's given."""
+    global _saved_state_colors
+    with _db_lock, _connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO app_settings (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (_STATE_COLORS_KEY, json.dumps(colors)),
+        )
+    _saved_state_colors = dict(colors)
 
 
 def get_floor_layout() -> dict | None:

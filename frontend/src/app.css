@@ -1,7 +1,7 @@
 /* ---------------------------------------------------------------------
    Design tokens. Only :root[data-theme] blocks change between themes —
-   the five machine-state colours below are defined once, outside any
-   theme block, and are never touched by the toggle.
+   the machine-state colours (set at runtime, see below) are the same in
+   both themes and never touched by the toggle.
 --------------------------------------------------------------------- */
 
 :root {
@@ -10,53 +10,31 @@
      dashboard scales together from this one variable. */
   --ui-scale: 1;
 
-  /* Opelka brand blue — WAITING state, active nav/toggle highlights, and
+  /* Opelka brand blue — active nav/toggle highlights, and
      the Next Action card's accent (light theme). Fixed (not theme-dependent): it's
      a brand colour, not a UI accent that should shift with light/dark. */
   --opelka-blue: #05346c;
   --opelka-blue-fg: #ffffff;
 
-  /* Machine-state colours — the ONE place to tune them (tiles, list dots,
-     legend, Next Action banner, Statistics timeline/charts all read these).
-     Deliberately theme-independent: a state must look the same on every
-     screen. Every pair below is readable on both the light and the dark
-     app background. */
-  --state-cold: #6b7280;
-  --state-cold-fg: #ffffff;
-  /* Standby with no readable oil temperature, and Unknown (unexpected PLC
-     value): Cold's grey, told apart by a lighter border
-     (--state-standby-border, see FryerTile.svelte's .light-border). */
-  --state-standby: var(--state-cold);
-  --state-standby-fg: var(--state-cold-fg);
-  --state-standby-border: #d1d5db;
+  /* Machine-state colours (--state-<slot> and their text colour
+     --state-<slot>-fg) are NOT defined here: they're Service-configurable
+     and set on <html> at runtime by lib/stateColors.js from
+     GET /api/state-colors (defaults: production_pilot/state_colors.py).
+     Slots: waiting, baking, near-completion, heating, hot, cold, blocked,
+     error, standby. Theme-independent: a state looks the same in light and
+     dark. Only the fixed, non-configurable extras live here: */
+  /* Unknown (unexpected PLC value) shares the Standby fallback grey. */
   --state-unrecognized: var(--state-standby);
   --state-unrecognized-fg: var(--state-standby-fg);
-  --state-heating: #f59e0b;
-  --state-heating-fg: #1c1c1c;
-  /* Hot = Standby (NOT in auto mode) with hot oil. Bright yellow with dark
-     text (13:1). */
-  --state-hot: #facc15;
-  --state-hot-fg: #1c1c1c;
-  --state-waiting: var(--opelka-blue);
-  --state-waiting-fg: var(--opelka-blue-fg);
-  /* Blocked = waiting for another machine. Dark grey-blue slate, always
-     drawn with a dashed border (--state-blocked-border) — lighter and at
-     full opacity, unlike the dimmed Offline tile. */
-  --state-blocked: #334e68;
-  --state-blocked-fg: #ffffff;
+  /* Lighter border telling the Standby/Unknown fallback apart from Cold
+     (FryerTile.svelte's .light-border). */
+  --state-standby-border: #d1d5db;
+  /* Blocked = waiting for another machine: always a dashed border, whatever
+     its colour — lighter and at full opacity, unlike the dimmed Offline tile. */
   --state-blocked-border: #9fb3c8;
-  --state-baking: #16a34a;
-  --state-baking-fg: #ffffff;
-  --state-error: #dc2626;
-  --state-error-fg: #ffffff;
-
-  /* "Fast fertig"/"Almost finished" display override (BAKING with
-     remaining_seconds below the near-completion threshold — see
-     priority.is_near_completion). Purple with white text (5.4:1).
-     MachineState itself stays BAKING; this is a display-only colour,
-     never sent as a machine state. */
-  --state-near-completion: #9333ea;
-  --state-near-completion-fg: #ffffff;
+  /* Text on the Heating tile with a rising fill: always dark, because the
+     tile itself stays white / light slate whatever fill colour is set. */
+  --heating-level-fg: #1c1c1c;
 
   --offline-bg: #374151;
   --offline-fg: #e5e7eb;

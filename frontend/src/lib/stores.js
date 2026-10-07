@@ -1,4 +1,4 @@
-import { writable, readable } from 'svelte/store';
+import { writable, readable, get } from 'svelte/store';
 
 function persisted(key, initial) {
   let value = initial;
@@ -81,3 +81,17 @@ export const statsHiddenColumns = persisted('pp_stats_hidden_columns', []);
 // Service floor layout editor sets it right after a save so this browser
 // shows the change immediately.
 export const floorLayout = writable(null);
+
+// Set by a Service section with unsaved changes (StateColorsCard.svelte)
+// to the confirmation text shown before leaving the page; null = nothing
+// unsaved. navigateTo()/confirmLeave() are what the sidebar uses.
+export const leaveGuard = writable(null);
+
+export function confirmLeave() {
+  const message = get(leaveGuard);
+  return !message || window.confirm(message);
+}
+
+export function navigateTo(target) {
+  if (get(page) !== target && confirmLeave()) page.set(target);
+}

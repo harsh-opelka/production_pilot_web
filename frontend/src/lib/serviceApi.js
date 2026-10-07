@@ -204,6 +204,16 @@ export async function getLayout() {
   return res.json();
 }
 
+// State colours: GET is open (the dashboard loads them itself, see
+// stateColors.js); saving is Service-only. "Reset all" is a save of the
+// defaults the GET returned.
+export function saveStateColors(colors) {
+  return serviceFetch('/api/state-colors', {
+    method: 'PUT',
+    body: JSON.stringify(colors),
+  });
+}
+
 export function saveLayout(layout) {
   return serviceFetch('/api/layout', {
     method: 'PUT',

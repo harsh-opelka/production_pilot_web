@@ -9,6 +9,7 @@
   import DataSourceCard from './DataSourceCard.svelte';
   import InstallWizard from './InstallWizard.svelte';
   import FloorLayoutEditor from './FloorLayoutEditor.svelte';
+  import StateColorsCard from './StateColorsCard.svelte';
 
   let wizardOpen = $state(false);
 </script>
@@ -31,6 +32,13 @@
 
     <div class="card full-width">
       <FloorLayoutEditor />
+    </div>
+  </section>
+
+  <section class="section">
+    <h2 class="section-heading">{translate($lang, 'service_section_display')}</h2>
+    <div class="card">
+      <StateColorsCard />
     </div>
   </section>
 
