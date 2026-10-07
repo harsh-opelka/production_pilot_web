@@ -7,6 +7,7 @@
   import { TV_SIZE_PX, placeInArea, stackedTileWidth } from './floorLayout.js';
   import MachineGroupSection from './MachineGroupSection.svelte';
   import ViewToggle from './ViewToggle.svelte';
+  import DemoButton from './DemoButton.svelte';
   import StateLegend from './StateLegend.svelte';
   import TvIcon from './TvIcon.svelte';
 
@@ -112,6 +113,7 @@
   <div class="toolbar">
     <StateLegend language={$lang} />
     <ViewToggle />
+    <DemoButton />
   </div>
 
   <div class="groups" bind:clientWidth={areaW} bind:clientHeight={areaH}>

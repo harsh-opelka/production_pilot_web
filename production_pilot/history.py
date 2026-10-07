@@ -41,6 +41,7 @@ _FLOOR_LAYOUT_KEY = "floor_layout"
 _HOT_COLD_THRESHOLD_KEY = "hot_cold_threshold_c"
 _STATE_COLORS_KEY = "state_colors"
 _NEW_CYCLE_DELAY_KEY = "new_cycle_delay_seconds"
+_DEMO_BUTTON_FOR_ALL_KEY = "demo_button_for_all"
 _DEFAULT_NEW_CYCLE_DELAY_SECONDS = "120"
 _DEFAULT_HOT_COLD_THRESHOLD_C = "50"
 _STATE_MAPPING_VERSION_KEY = "state_mapping_version"
@@ -351,6 +352,27 @@ def set_hot_cold_threshold_c(threshold_c: float) -> None:
             (_HOT_COLD_THRESHOLD_KEY, repr(float(threshold_c))),
         )
     _hot_cold_threshold_c = float(threshold_c)
+
+
+def get_demo_button_for_all() -> bool:
+    """Customer Demo Mode: True = every user sees the Demo (play) button,
+    False (default) = Service level only. Read on demand, no cache."""
+    with _db_lock, _connection() as conn:
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = ?", (_DEMO_BUTTON_FOR_ALL_KEY,)
+        ).fetchone()
+    return row is not None and row["value"] == "true"
+
+
+def set_demo_button_for_all(enabled: bool) -> None:
+    with _db_lock, _connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO app_settings (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (_DEMO_BUTTON_FOR_ALL_KEY, "true" if enabled else "false"),
+        )
 
 
 def get_new_cycle_delay_seconds() -> int:

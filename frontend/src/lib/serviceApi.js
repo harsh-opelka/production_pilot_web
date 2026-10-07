@@ -216,6 +216,63 @@ export async function getLayout() {
   return res.json();
 }
 
+// Customer Demo Mode. The recording is sent as the raw WebM body (no
+// multipart); duration_seconds lets the backend write the seek index.
+// One upload function for the demo recording: XMLHttpRequest rather than
+// fetch for upload progress; a generous timeout and no AbortController /
+// keepalive (keepalive caps the body at 64 KB). Resolves with the demo
+// status; rejects with ServiceApiError("HTTP <status>: <server message>")
+// for an HTTP error, or UploadNetworkError when no response arrived at all.
+// A 401 does NOT log out here (unlike serviceFetch): the unsaved recording
+// must stay on screen so it can be retried after logging in again.
+export const DEMO_UPLOAD_TIMEOUT_MS = 15 * 60 * 1000;
+
+export class UploadNetworkError extends Error {
+  constructor(kind) {
+    super(kind === 'timeout' ? 'Upload timed out' : 'No response from the server');
+    this.name = 'NetworkError';
+    this.kind = kind; // 'network' | 'timeout'
+  }
+}
+
+export function uploadDemoVideo(blob, durationSeconds, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `/api/demo/video?duration_seconds=${encodeURIComponent(durationSeconds.toFixed(2))}`);
+    xhr.timeout = DEMO_UPLOAD_TIMEOUT_MS;
+    xhr.setRequestHeader('Content-Type', 'video/webm');
+    const { token } = get(auth);
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress?.(event.loaded / event.total);
+    };
+    xhr.onload = () => {
+      let data = null;
+      try {
+        data = JSON.parse(xhr.responseText);
+      } catch {
+        // non-JSON body (e.g. a proxy error page)
+      }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+      else reject(new ServiceApiError(`HTTP ${xhr.status}: ${data?.detail ?? (xhr.statusText || 'request failed')}`, xhr.status));
+    };
+    xhr.onerror = () => reject(new UploadNetworkError('network'));
+    xhr.ontimeout = () => reject(new UploadNetworkError('timeout'));
+    xhr.send(blob);
+  });
+}
+
+export function deleteDemoVideo() {
+  return serviceFetch('/api/demo/video', { method: 'DELETE' });
+}
+
+export function setDemoSettings(showForAll) {
+  return serviceFetch('/api/service/demo-settings', {
+    method: 'PUT',
+    body: JSON.stringify({ show_for_all: showForAll }),
+  });
+}
+
 // State colours: GET is open (the dashboard loads them itself, see
 // stateColors.js); saving is Service-only. "Reset all" is a save of the
 // defaults the GET returned.

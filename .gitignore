@@ -17,3 +17,6 @@ scan_results.json
 
 # Local runtime data — KPI history logger, never committed
 history.db
+
+# Customer Demo Mode recording (data/demo/demo.webm) — runtime data, never committed
+data/

@@ -11,6 +11,7 @@
   import InstallWizard from './InstallWizard.svelte';
   import FloorLayoutEditor from './FloorLayoutEditor.svelte';
   import StateColorsCard from './StateColorsCard.svelte';
+  import CustomerDemoCard from './CustomerDemoCard.svelte';
 
   let wizardOpen = $state(false);
 </script>
@@ -40,6 +41,12 @@
     <h2 class="section-heading">{translate($lang, 'service_section_display')}</h2>
     <div class="card">
       <StateColorsCard />
+    </div>
+
+    <div class="cards demo-cards">
+      <div class="card">
+        <CustomerDemoCard />
+      </div>
     </div>
   </section>
 
@@ -138,6 +145,10 @@
        caused the reported overflow, not the grid/card sizing itself. */
     min-width: 0;
     overflow-wrap: break-word;
+  }
+
+  .demo-cards {
+    margin-top: clamp(1rem, 2vw, 2rem);
   }
 
   /* Floor layout editor — needs the whole row for a usable canvas. */

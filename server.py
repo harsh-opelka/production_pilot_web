@@ -31,11 +31,15 @@ from typing import Any
 
 import uvicorn
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse, JSONResponse
+from starlette.requests import ClientDisconnect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from production_pilot import (
-    exports, history, hot_cold, layout, new_cycle, plc_config, scan_plcs, service_config, state_colors, stats,
+    demo_video, exports, history, hot_cold, layout, new_cycle, plc_config, scan_plcs, service_config, state_colors,
+    stats,
 )
 from production_pilot.demo_source import RECIPE_OPTIONS, SimulatedSource
 from production_pilot.models import MachineGroup
@@ -591,6 +595,12 @@ class DemoSetStateIn(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     history.init_db()
+    try:
+        removed = demo_video.cleanup_orphans()  # interrupted uploads, superseded demo versions
+        if removed:
+            print(f"[demo] cleaned up {len(removed)} leftover file(s): {', '.join(removed)}")
+    except OSError as exc:
+        print(f"[demo] cleanup skipped: {exc}")
 
     # One instant shared by the startup marker and the elapsed-timer
     # anchors, so "when this session started observing" is a single
@@ -1224,6 +1234,137 @@ def stats_daily_summary_pdf(
         comparison=stats.compute_seven_day_average(date, totals),
     )
     return _download(pdf, "application/pdf", f"daily-summary-{date}.pdf")
+
+
+# ---------------------------------------------------------------------------
+# Customer Demo Mode — one recorded demo video (see production_pilot/
+# demo_video.py). Recording/deleting is Service-only. Playing follows the
+# "Show Demo button for all users" setting: ON = anyone may stream it,
+# OFF = Service only (token via header, or ?token= since a <video> can't
+# send headers — same as the exports). Nothing here touches PLC state,
+# history or statistics.
+# ---------------------------------------------------------------------------
+
+
+class DemoSettingsIn(BaseModel):
+    show_for_all: bool
+
+
+def _demo_status() -> dict:
+    return {**demo_video.status(), "show_for_all": history.get_demo_button_for_all()}
+
+
+@app.get("/api/demo/status")
+def get_demo_status() -> dict:
+    """Open to everyone: the dashboard needs it to decide whether to show
+    the Demo button and which video version to load."""
+    return _demo_status()
+
+
+@app.get("/api/demo/video")
+def get_demo_video(
+    authorization: str | None = Header(default=None), token: str | None = None, which: str = "current"
+):
+    """Streams the demo (which=current, or which=previous: the last good
+    version, the player's fallback). FileResponse opens the file per request
+    and closes it when the response ends or the client disconnects; it
+    answers Range requests with 206 (seeking) and sends ETag/Last-Modified.
+    no-cache + the versioned URL (?v=) make a new recording show up at once."""
+    if not history.get_demo_button_for_all():
+        _token, level = _resolve_level(_bearer_token(authorization) or token)
+        if _LEVEL_RANK[level] < _LEVEL_RANK["service"]:
+            raise HTTPException(status_code=403, detail="Insufficient access level")
+    path = demo_video.video_path(which)
+    if path is None or not path.is_file():
+        raise HTTPException(status_code=404, detail="No demo recorded yet" if which == "current" else "No previous demo")
+    return FileResponse(path, media_type="video/webm", headers={"Cache-Control": "no-cache"})
+
+
+_DEMO_UPLOAD_TYPES = {"video/webm", "application/octet-stream"}
+
+
+async def _drain(request: Request) -> None:
+    """Reads and discards the rest of the body, so an error answer reaches the
+    browser as a real HTTP response instead of a dropped connection
+    ("Failed to fetch")."""
+    try:
+        async for _chunk in request.stream():
+            pass
+    except ClientDisconnect:
+        pass
+
+
+def _demo_error(status_code: int, detail: str) -> JSONResponse:
+    return JSONResponse({"detail": detail}, status_code=status_code)
+
+
+@app.post("/api/demo/video")
+async def upload_demo_video(
+    request: Request,
+    duration_seconds: float | None = None,
+    _token: str = Depends(require_level("service")),
+):
+    """Raw WebM body (no multipart), streamed chunk by chunk into a temp file
+    (never held in memory); validation, the seek fix / ffmpeg remux and the
+    pointer switch run in a worker thread (demo_video.store), so the event
+    loop - state polling, WebSocket - is never blocked. Errors are JSON with
+    a status code (413 too large, 415 wrong type, 422 invalid recording,
+    500 unexpected); the current demo is never changed by a failed upload."""
+    content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if content_type not in _DEMO_UPLOAD_TYPES:
+        await _drain(request)
+        return _demo_error(415, f"Expected a WebM video (video/webm), got {content_type or 'no content type'}")
+    try:
+        duration = demo_video.validate_duration(duration_seconds)
+    except demo_video.DemoVideoError as exc:
+        await _drain(request)
+        return _demo_error(422, str(exc))
+    too_large = f"Recording larger than {demo_video.MAX_SIZE_BYTES // (1024 * 1024)} MB"
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > demo_video.MAX_SIZE_BYTES:
+        await _drain(request)
+        return _demo_error(413, too_large)
+
+    upload = demo_video.new_upload_path()
+    try:
+        size = 0
+        with upload.open("wb") as f:
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size <= demo_video.MAX_SIZE_BYTES:
+                    await run_in_threadpool(f.write, chunk)
+                # over the limit: keep reading (discarding) so the 413 below arrives
+        if size > demo_video.MAX_SIZE_BYTES:
+            return _demo_error(413, too_large)
+        if size == 0:
+            return _demo_error(422, "The recording is empty")
+        try:
+            await run_in_threadpool(demo_video.store, upload, duration)
+        except demo_video.DemoVideoError as exc:
+            return _demo_error(422, str(exc))
+        except Exception as exc:  # disk full, permissions, ... - old demo untouched
+            print(f"[demo] saving the recording failed: {type(exc).__name__}: {exc}")
+            return _demo_error(500, f"Saving failed on the server: {type(exc).__name__}: {exc}")
+        return _demo_status()
+    except ClientDisconnect:
+        # Browser tab closed / connection lost mid-upload: nothing to answer,
+        # nothing stored - the current demo stays as it was.
+        print("[demo] upload aborted by the client - previous demo kept")
+        return Response(status_code=400)
+    finally:
+        upload.unlink(missing_ok=True)
+
+
+@app.delete("/api/demo/video")
+def delete_demo_video(_token: str = Depends(require_level("service"))) -> dict:
+    demo_video.delete()
+    return _demo_status()
+
+
+@app.put("/api/service/demo-settings")
+def put_demo_settings(body: DemoSettingsIn, _token: str = Depends(require_level("service"))) -> dict:
+    history.set_demo_button_for_all(body.show_for_all)
+    return _demo_status()
 
 
 # Mounted last so it only catches what /api/* and /ws didn't already

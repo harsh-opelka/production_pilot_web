@@ -10,6 +10,9 @@
   import ServicePage from './lib/ServicePage.svelte';
   import Settings from './lib/Settings.svelte';
   import Footer from './lib/Footer.svelte';
+  import DemoOverlay from './lib/DemoOverlay.svelte';
+  import RecordingChip from './lib/RecordingChip.svelte';
+  import { loadDemoStatus } from './lib/demoMode.js';
 
   $effect(() => {
     document.documentElement.dataset.theme = $theme;
@@ -43,6 +46,7 @@
   });
 
   onMount(async () => {
+    loadDemoStatus();
     await fetchInitialState();
     connectWebSocket();
   });
@@ -71,6 +75,11 @@
   </div>
   <Footer />
 </div>
+
+<!-- Customer Demo Mode: the looping demo video above everything (the live
+     app keeps running underneath), and the REC chip while recording. -->
+<DemoOverlay />
+<RecordingChip />
 
 <style>
   /* Column: the sidebar+main row fills whatever height remains above the
