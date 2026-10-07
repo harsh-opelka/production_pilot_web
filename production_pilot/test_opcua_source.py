@@ -2,7 +2,7 @@
 test_opcua_source.py
 ---------------------
 Plain-assert self-test for OpcUaSource: the raw state value mapping
-(PLC_STATE_MAP, state mapping v3) including unexpected values, and the
+(PLC_STATE_MAP) including unexpected values, and the
 optional nodes (current/target oil temperature, recipe name) — a failed
 or empty read must come back as None without taking the PLC offline or
 breaking the state read. Uses a fake OPC UA client — no PLC needed:
@@ -90,10 +90,10 @@ def _check(label: str, actual, expected) -> bool:
 def main() -> bool:
     results = []
 
-    print("--- state mapping v3 (::auto:external_machine_state) ---")
-    results.append(_check("0..5 -> Error, Standby, Heating, Waiting, Blocked, Baking",
+    print("--- state mapping (::auto:external_machine_state) ---")
+    results.append(_check("0, 1, 3, 4, 5, 6 -> Error, Standby, Heating, Waiting, Blocked, Baking (no 2)",
                           {k: v.name for k, v in PLC_STATE_MAP.items()},
-                          {0: "ERROR", 1: "STANDBY", 2: "HEATING", 3: "WAITING", 4: "BLOCKED", 5: "BAKING"}))
+                          {0: "ERROR", 1: "STANDBY", 3: "HEATING", 4: "WAITING", 5: "BLOCKED", 6: "BAKING"}))
     results.append(_check("Cold / Hot are not PLC values any more",
                           {MachineState.COLD, MachineState.HOT} & set(PLC_STATE_MAP.values()), set()))
     for raw, expected in PLC_STATE_MAP.items():
@@ -101,18 +101,34 @@ def main() -> bool:
         results.append(_check(f"raw {raw} reads as {expected.name}, online",
                               (plc.state, plc.is_online), (expected, True)))
 
-    for raw in (6, -1, 2.5, "3", None, True):
-        source = _source_with({_STATE_NODE_ID: raw, _REMAINING_TIME_NODE_ID: None, _OIL_TEMP_CURRENT_NODE_ID: 80.0})
+    # Unrecognized values: ignored, last valid state kept, never offline.
+    source = _source_with({_STATE_NODE_ID: 4, _REMAINING_TIME_NODE_ID: None, _OIL_TEMP_CURRENT_NODE_ID: 80.0})
+    _poll(source)
+    values = source._connections[IP]._client._values
+    for raw in (2, 7):
+        values[_STATE_NODE_ID] = raw
         plc, log = _poll(source, polls=3)
-        results.append(_check(f"raw {raw!r} -> Unknown, still online, temperature still read",
+        results.append(_check(f"Waiting, then raw {raw} -> still Waiting, online, temperature still read",
+                              (plc.state, plc.is_online, plc.oil_temp_current), (MachineState.WAITING, True, 80.0)))
+        results.append(_check(f"raw {raw}: exactly one warning over 3 polls",
+                              log.count("unrecognized machine state"), 1))
+    values[_STATE_NODE_ID] = 6
+    plc, _ = _poll(source)
+    results.append(_check("next valid value applies again (6 -> Baking)", plc.state, MachineState.BAKING))
+    values[_STATE_NODE_ID] = 2
+    plc, log = _poll(source)
+    results.append(_check("raw 2 again: Baking kept, no second warning",
+                          (plc.state, log.count("unrecognized")), (MachineState.BAKING, 0)))
+
+    for raw in (2, 7, -1, 2.5, "3", None, True):
+        source = _source_with({_STATE_NODE_ID: raw, _REMAINING_TIME_NODE_ID: None, _OIL_TEMP_CURRENT_NODE_ID: 80.0})
+        plc, _ = _poll(source, polls=3)
+        results.append(_check(f"raw {raw!r} with no valid state yet -> Unknown, still online",
                               (plc.state, plc.is_online, plc.oil_temp_current, plc.state.value),
                               (MachineState.UNRECOGNIZED, True, 80.0, "Unknown")))
-        results.append(_check(f"raw {raw!r}: one warning over 3 polls", log.count("unrecognized machine state"), 1))
-    plc, log = _poll(_source_with({_STATE_NODE_ID: 6, _REMAINING_TIME_NODE_ID: None}))
-    results.append(_check("raw 6 again on another PLC: no second warning", log.count("unrecognized"), 0))
     print()
 
-    required = {_STATE_NODE_ID: 5, _REMAINING_TIME_NODE_ID: 120}
+    required = {_STATE_NODE_ID: 6, _REMAINING_TIME_NODE_ID: 120}
 
     plc, _ = _poll(_source_with({
         **required,

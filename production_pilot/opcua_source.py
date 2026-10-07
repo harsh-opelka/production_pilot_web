@@ -11,8 +11,8 @@ PLC must not stall the other PLCs' reads or the poll loop itself.
 
 Node IDs (confirmed identical on every connected PLC, Tim), all in
 namespace _NAMESPACE_INDEX as string node ids:
-    state:           "::auto:external_machine_state"  -> int 0..5, see
-                      PLC_STATE_MAP below for the value mapping
+    state:           "::auto:external_machine_state"  -> int 0, 1, 3..6
+                      (2 is not a state), see PLC_STATE_MAP below
     remaining time:  "::auto:ActRestzeitGes"           -> int seconds,
                       no scaling conversion needed
   Optional (a failed read never takes the PLC offline — see _OPTIONAL_NODES):
@@ -49,17 +49,19 @@ _OIL_TEMP_TARGET_NODE_ID = "::AsGlobalPV:gFormatSet.BackTemperatur"
 _RECIPE_NAME_NODE_ID = "::AsGlobalPV:gFormatVerwaltung.ActFormatName"
 
 # Raw value of _STATE_NODE_ID -> MachineState. The ONE place that knows
-# the PLC's numbers (state mapping v3, Tim) — everything else, including
-# history.db (which stores MachineState NAMES), only sees MachineState.
-# Cold/Hot are not PLC values any more: hot_cold.py derives them from
-# STANDBY + oil temperature.
+# the PLC's numbers (Tim) — everything else, including history.db (which
+# stores MachineState NAMES), only sees MachineState. 2 is deliberately
+# missing: it is not a state, and like any other unmapped value it is
+# ignored (see state_from_plc_value / OpcUaSource.get_machines). Cold/Hot
+# are not PLC values either: hot_cold.py derives them from STANDBY + oil
+# temperature.
 PLC_STATE_MAP: dict[int, MachineState] = {
     0: MachineState.ERROR,
     1: MachineState.STANDBY,   # NOT in auto mode
-    2: MachineState.HEATING,
-    3: MachineState.WAITING,
-    4: MachineState.BLOCKED,   # waiting for another machine
-    5: MachineState.BAKING,
+    3: MachineState.HEATING,
+    4: MachineState.WAITING,
+    5: MachineState.BLOCKED,   # waiting for another machine
+    6: MachineState.BAKING,
 }
 
 # Raw values already warned about — one warning per distinct value for the
@@ -67,17 +69,18 @@ PLC_STATE_MAP: dict[int, MachineState] = {
 _warned_state_values: set = set()
 
 
-def state_from_plc_value(value) -> MachineState:
-    """PLC_STATE_MAP lookup. Anything else (an int outside the map, a
-    negative, a non-integer, None) is MachineState.UNRECOGNIZED — never an
-    exception, so an unexpected value can't take the PLC offline."""
+def state_from_plc_value(value) -> MachineState | None:
+    """PLC_STATE_MAP lookup. Anything else (2, an int outside the map, a
+    negative, a non-integer, None) is None = "ignore this value" — never an
+    exception, so an unexpected value can't take the PLC offline. The
+    caller keeps the PLC's last valid state (OpcUaSource.get_machines)."""
     if isinstance(value, int) and not isinstance(value, bool) and value in PLC_STATE_MAP:
         return PLC_STATE_MAP[value]
     key = repr(value)
     if key not in _warned_state_values:
         _warned_state_values.add(key)
-        print(f"[opcua] unrecognized machine state value {key} — showing it as Unknown")
-    return MachineState.UNRECOGNIZED
+        print(f"[opcua] ignoring unrecognized machine state value {key} — keeping the last valid state")
+    return None
 
 
 # B&R Automation Studio auto-exported OPC UA globals (the "::auto:" prefix)
@@ -118,7 +121,7 @@ _OPTIONAL_NODES = {
 
 @dataclass
 class PlcReading:
-    state: MachineState
+    state: MachineState | None   # None = unrecognized value, ignored
     remaining_seconds: int | None
     oil_temp_current: float | None = None
     oil_temp_target: float | None = None
@@ -179,7 +182,7 @@ class _PlcConnection:
         """
         Returns a PlcReading on success, or None if the PLC is
         unreachable or the connection fails. Never raises. An unexpected
-        state VALUE is not a failure: it reads as UNRECOGNIZED (see
+        state VALUE is not a failure: state comes back None (see
         state_from_plc_value) and the PLC stays online. Only the state
         and remaining-time reads decide online/offline; the optional
         nodes (temperatures, recipe) just come back as None when they
@@ -223,6 +226,9 @@ class OpcUaSource:
         self._groups: list[MachineGroup] = []
         self._connections: dict[str, _PlcConnection] = {}
         self._online: dict[str, bool] = {}
+        # ip -> last state read from a VALID raw value; kept across offline
+        # spells. An unrecognized value keeps showing this (see get_machines).
+        self._last_valid_state: dict[str, MachineState] = {}
         self._load_config(Path(config_path))
 
     def _load_config(self, config_path: Path) -> None:
@@ -276,7 +282,11 @@ class OpcUaSource:
                     plc.oil_temp_target = None
                     plc.recipe_name = None
                 else:
-                    plc.state = result.state
+                    if result.state is not None:
+                        self._last_valid_state[plc.ip] = result.state
+                    # Unrecognized value: ignored — last valid state, or
+                    # Unknown when this PLC never sent a valid one.
+                    plc.state = self._last_valid_state.get(plc.ip, MachineState.UNRECOGNIZED)
                     plc.remaining_seconds = result.remaining_seconds
                     plc.oil_temp_current = result.oil_temp_current
                     plc.oil_temp_target = result.oil_temp_target

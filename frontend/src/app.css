@@ -11,7 +11,7 @@
   --ui-scale: 1;
 
   /* Opelka brand blue — WAITING state, active nav/toggle highlights, and
-     the "Next action" Load-tier pill. Fixed (not theme-dependent): it's
+     the Next Action card's accent (light theme). Fixed (not theme-dependent): it's
      a brand colour, not a UI accent that should shift with light/dark. */
   --opelka-blue: #05346c;
   --opelka-blue-fg: #ffffff;
@@ -61,13 +61,6 @@
   --offline-bg: #374151;
   --offline-fg: #e5e7eb;
   --offline-border: #94a3b8;
-
-  /* "Next action" tier backgrounds (TopBar pill). Error/Ready/Near-
-     completion all reuse the state colours above so the pill always
-     matches the tile it's summarizing exactly — see TopBar.svelte's
-     .tier-near-completion, which pulls --state-near-completion/-fg
-     directly rather than having its own colour. */
-  --tier-none-bg: #6b7280;
 
   /* Sidebar is fixed dark navy in both themes (see task layout spec). */
   --sidebar-bg: #0b1220;
@@ -131,9 +124,19 @@
      text at 9.4:1 and stands clearly apart from the dark page. */
   --heating-empty-bg: #b6c2d1;
   --heating-empty-border: #64748b;
-  /* Next Action smiley banner — nothing to do right now (TopBar.svelte). */
-  --banner-all-baking-bg: #1e293b;
-  --banner-all-baking-fg: var(--text-primary);
+  /* Next Action card (TopBar.svelte) + NEXT badge / ring (FryerTile.svelte):
+     one look for every action. Dark neutral surface (not the page or top
+     bar background) with a light border; the navy accent is lightened to
+     #3b7ddd so it shows on dark (3.6:1 vs the card, white digits on it
+     4.1:1 — large bold text). Light text 13.4:1, label 5.7:1. */
+  --next-card-bg: #1f2937;
+  --next-card-border: #475569;
+  --next-card-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+  --next-accent: #3b7ddd;
+  --next-accent-fg: #ffffff;
+  --next-accent-glow: rgba(59, 125, 221, 0.4);
+  --next-label: #94a3b8;
+  --next-text: #f1f5f9;
   --bg-app: #0f172a;
   --bg-topbar: #111827;
   --bg-panel: #1e293b;
@@ -161,8 +164,16 @@
   /* See the dark block: white empty part, thin neutral border. */
   --heating-empty-bg: #ffffff;
   --heating-empty-border: #cbd5e1;
-  --banner-all-baking-bg: #ffffff;
-  --banner-all-baking-fg: var(--text-primary);
+  /* See the dark block. Off-white card, OPELKA navy accent / text
+     (11.6:1), muted grey-navy label (5.6:1), white digits on navy 12.3:1. */
+  --next-card-bg: #f8f9fb;
+  --next-card-border: #dbe1e8;
+  --next-card-shadow: 0 2px 8px rgba(15, 23, 42, 0.1);
+  --next-accent: var(--opelka-blue);
+  --next-accent-fg: #ffffff;
+  --next-accent-glow: rgba(5, 52, 108, 0.3);
+  --next-label: #56657a;
+  --next-text: var(--opelka-blue);
   --bg-app: #eef2f7;
   --bg-topbar: #ffffff;
   --bg-panel: #ffffff;

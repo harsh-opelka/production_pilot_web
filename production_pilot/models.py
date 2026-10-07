@@ -21,7 +21,8 @@ class MachineState(Enum):
     # oil temperature is unreadable; otherwise hot_cold.py turns it into
     # COLD or HOT.
     STANDBY = "Standby"
-    # The PLC sent a value outside PLC_STATE_MAP. Shown as "Unknown", but
+    # The PLC has only sent values outside PLC_STATE_MAP so far (with a
+    # valid state before, that one is kept instead). Shown as "Unknown", but
     # deliberately NOT named UNKNOWN: that name is already taken in
     # state_transitions by history.UNKNOWN_MARKER (server-startup marker).
     UNRECOGNIZED = "Unknown"

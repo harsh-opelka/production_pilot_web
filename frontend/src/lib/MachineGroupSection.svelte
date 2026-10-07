@@ -12,7 +12,6 @@
     language = 'en',
     productivityByIp = {},
     nextActionIp = null,
-    nextActionTier = null,
     floor = false,
     orientation = 'horizontal',
   } = $props();
@@ -34,7 +33,7 @@
       style={floor ? `--tile-count: ${plcs.length};` : ''}
     >
       {#each plcs as plc (plc.ip)}
-        <FryerTile {plc} {language} isNext={plc.ip === nextActionIp} tier={nextActionTier} />
+        <FryerTile {plc} {language} isNext={plc.ip === nextActionIp} />
       {/each}
     </div>
   {:else}

@@ -137,11 +137,6 @@ def test_select_next_action() -> list[bool]:
     results.append(_check("everything offline -> none",
                           pick(machines((BAKING, 600, False))), (ACTION_NONE, None)))
     results.append(_check("no machines -> none", pick([]), (ACTION_NONE, None)))
-    for shown in (COLD, HOT, STANDBY):
-        results.append(_check(f"Switch to Auto carries the chosen PLC's state ({shown.name}) for the banner colour",
-                              select_next_action(machines(BAKING_LONG, shown))["state"], shown.name))
-    results.append(_check("smiley carries no state",
-                          select_next_action(machines(BAKING_LONG))["state"], None))
     results.append(_check("result carries the chosen PLC's ip",
                           select_next_action(machines(BAKING_LONG, WAITING))["ip"], "10.0.0.2"))
     return results

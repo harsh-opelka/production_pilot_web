@@ -16,8 +16,8 @@
     ServiceApiError,
   } from './serviceApi.js';
 
-  // The RAW PLC states, same order as the PLC's integer values 0..5
-  // (opcua_source.PLC_STATE_MAP). No Cold / Hot here: set Standby plus a
+  // The RAW PLC states, same order as the PLC's integer values 0, 1, 3..6
+  // (opcua_source.PLC_STATE_MAP; 2 is not a state). No Cold / Hot here: set Standby plus a
   // temperature and the backend derives Cold or Hot (hot_cold.py).
   const STATES = ['ERROR', 'STANDBY', 'HEATING', 'WAITING', 'BLOCKED', 'BAKING'];
   const STATE_KEY = {

@@ -31,13 +31,13 @@
 
 <header class="topbar">
   <div class="next-action">
-    <div class="next-action-box tier-{nextAction.tier}" class:all-baking={nextAction.nothingToDo}>
+    <div class="next-action-box">
       <span class="na-label">{translate($lang, 'next_action_prefix')}</span>
       {#if nextAction.nothingToDo}
-        <!-- Nothing to do right now: a smiley instead of the dash.
+        <!-- Nothing to do right now: a smiley instead of the dash, centred.
              Inline SVG rather than an emoji — the Jetson may have no emoji
              font. 1em square, so it matches the banner text size. -->
-        <span class="na-content">
+        <span class="na-content na-smiley">
           <svg
             class="smiley"
             viewBox="0 0 24 24"
@@ -49,6 +49,11 @@
             <circle cx="15.5" cy="9.5" r="1.5" fill="#1c1c1c" />
             <path d="M7.3 14 Q12 18.8 16.7 14" fill="none" stroke="#1c1c1c" stroke-width="1.9" stroke-linecap="round" />
           </svg>
+        </span>
+      {:else if nextAction.unit != null}
+        <span class="na-content" title={nextAction.text}>
+          <span class="na-unit">{nextAction.unit}</span>
+          <span class="na-action">{nextAction.action}</span>
         </span>
       {:else}
         <span class="na-content">{nextAction.text}</span>
@@ -138,13 +143,12 @@
     gap: clamp(1.25rem, 3vw, 3rem);
   }
 
-  /* Two-tier hierarchy inside one coloured box: a small label on top
-     (na-label) and the combined "{unit}: action" text below it in a much
-     larger, bold weight (na-content) — see nextAction.js for how that
-     text is built. Padding bumped up substantially again from
-     clamp(0.55rem, 1.2vh, 0.95rem)/clamp(1rem, 1.9vw, 1.6rem) — the box
-     is now much wider AND taller (see .next-action's flex-grow), so it
-     needs real breathing room on every side, not just around the text. */
+  /* One constant card for every action (Tim): only the text changes,
+     never the colour. Small label on top (na-label), then the machine
+     number in a navy badge (na-unit) and the action text (na-action).
+     Border, navy accent bar and shadow are all box-shadows (the two
+     inset), so the card keeps exactly its previous size and padding.
+     Colours: --next-* tokens in app.css, per theme. */
   .next-action-box {
     flex: 1 1 auto;
     min-width: 0;
@@ -154,72 +158,61 @@
     gap: clamp(0.3rem, 0.6vh, 0.6rem);
     padding: clamp(1rem, 2.4vh, 1.9rem) clamp(1.5rem, 3vw, 2.75rem);
     border-radius: var(--radius);
-    color: #ffffff;
+    background: var(--next-card-bg);
+    color: var(--next-text);
+    box-shadow:
+      inset 5px 0 0 var(--next-accent),
+      inset 0 0 0 1px var(--next-card-border),
+      var(--next-card-shadow);
   }
 
   .na-label {
-    font-size: calc(var(--font-next-action) * 0.38);
+    font-size: calc(var(--font-next-action) * 0.36);
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.03em;
-    opacity: 0.85;
+    letter-spacing: 0.12em;
+    color: var(--next-label);
   }
 
+  /* One line: nowrap, at 90 % of the old size so the longest texts
+     ("Auf Auto stellen", "Störung prüfen") fit next to the badge; the
+     ellipsis is only a last resort at extreme Display Size settings. */
   .na-content {
-    font-size: var(--font-next-action);
+    display: flex;
+    align-items: center;
+    gap: 0.4em;
+    min-width: 0;
+    font-size: calc(var(--font-next-action) * 0.9);
     font-weight: 700;
     line-height: 1.15;
-    overflow-wrap: break-word;
+    white-space: nowrap;
   }
 
-  .tier-error {
-    background: var(--state-error);
+  .na-unit {
+    flex: 0 0 auto;
+    min-width: 1.35em;
+    padding: 0.08em 0.3em;
+    border-radius: 0.22em;
+    background: var(--next-accent);
+    color: var(--next-accent-fg);
+    text-align: center;
+    font-variant-numeric: tabular-nums;
   }
 
-  /* Same purple as the "Fast fertig"/"Almost finished" tile override
-     (see FryerTile.svelte / app.css's --state-near-completion) — reused
-     exactly, so the pill and the tile it's summarizing always match. */
-  .tier-near-completion {
-    background: var(--state-near-completion);
-    color: var(--state-near-completion-fg);
+  .na-action {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .na-smiley {
+    justify-content: center;
   }
 
   .smiley {
     display: block;
     width: 1.15em;
     height: 1.15em;
-  }
-
-  .tier-load {
-    background: var(--state-waiting);
-    color: var(--state-waiting-fg);
-  }
-
-  /* "Switch to Auto" takes the chosen machine's tile colour: Hot's yellow
-     with dark text, or (.tier-cold) Cold's grey with light text — also
-     used for plain Standby. */
-  .tier-hot {
-    background: var(--state-hot);
-    color: var(--state-hot-fg);
-  }
-
-  .tier-cold {
-    background: var(--state-cold);
-    color: var(--state-cold-fg);
-  }
-
-  .tier-none {
-    background: var(--tier-none-bg);
-  }
-
-  /* Every machine baking: white banner (light theme) / dark surface (dark
-     theme) with the yellow smiley. The 1px outline is an inset shadow so
-     the box keeps exactly the size of the other banner states, and it
-     still shows on the white top bar. */
-  .tier-none.all-baking {
-    background: var(--banner-all-baking-bg);
-    color: var(--banner-all-baking-fg);
-    box-shadow: inset 0 0 0 1px var(--border-color);
   }
 
   .logo-panel {

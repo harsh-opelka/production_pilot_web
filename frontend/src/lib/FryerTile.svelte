@@ -13,12 +13,11 @@
   import { nowTick } from './stores.js';
   import { translate } from './translations.js';
 
-  // isNext/tier: whether this tile is the single machine the Next Action
-  // banner currently points at, and which tier drove that pick (see
+  // isNext: whether this tile is the single machine the Next Action
+  // banner currently points at (see
   // TopBar.svelte + nextAction.js — this never recomputes priority itself,
-  // just mirrors the backend's next_action the caller already has). tier
-  // is only meaningful when isNext is true.
-  let { plc, language = 'en', isNext = false, tier = null } = $props();
+  // just mirrors the backend's next_action the caller already has).
+  let { plc, language = 'en', isNext = false } = $props();
 
   // "Fast fertig"/"Almost finished" override: its own purple token
   // (--state-near-completion) — see app.css. MachineState itself stays BAKING (see
@@ -45,8 +44,6 @@
           '--tile-bg: var(--heating-empty-bg); --tile-fg: var(--state-heating-fg);'
         : `--tile-bg: var(--state-${stateKey}); --tile-fg: var(--state-${stateKey}-fg);`,
   );
-  // Only meaningful (and only applied) while isNext is true — see .tile.next-priority.tier-* below.
-  let tierClass = $derived(isNext && tier ? `tier-${tier}` : '');
 
   // Blank ("—") rather than stale or invented values while offline.
   let recipeText = $derived(plc.is_online ? formatRecipe(plc.recipe_name) : formatRecipe(null));
@@ -70,7 +67,7 @@
 </script>
 
 <div
-  class="tile {tierClass}"
+  class="tile"
   class:offline={!plc.is_online}
   class:blocked={plc.is_online && plc.state === 'BLOCKED'}
   class:light-border={plc.is_online && (plc.state === 'STANDBY' || plc.state === 'UNRECOGNIZED')}
@@ -173,45 +170,16 @@
   }
 
   /* Top-priority highlight — the one tile matching the Next Action banner
-     (see FryerTile's isNext/tier props + Dashboard.svelte). Coloured
-     border + soft halo, using the exact same colour as the banner's
-     tier-* background (TopBar.svelte) so the two always agree. Only ever
-     one tile at a time carries this, since isNext is derived from the
-     single computeNextAction() result the whole dashboard shares. */
+     (see FryerTile's isNext prop + Dashboard.svelte). The same navy ring +
+     soft halo on every tile, whatever its state — the Next Action card's
+     accent colour (--next-accent, app.css), never a state colour. Only
+     ever one tile at a time carries this, since isNext is derived from the
+     single describeNextAction() result the whole dashboard shares. */
   .tile.next-priority {
-    border: 3px solid var(--tile-accent, transparent);
+    border: 3px solid var(--next-accent);
     box-shadow:
       var(--tile-shadow),
-      0 0 0 6px var(--tile-accent-glow, transparent);
-  }
-
-  .tile.next-priority.tier-error {
-    --tile-accent: var(--state-error);
-    --tile-accent-glow: rgba(220, 38, 38, 0.35);
-  }
-
-  .tile.next-priority.tier-near-completion {
-    --tile-accent: var(--state-near-completion);
-    --tile-accent-glow: rgba(147, 51, 234, 0.4);
-  }
-
-  .tile.next-priority.tier-load {
-    --tile-accent: var(--state-waiting);
-    --tile-accent-glow: rgba(5, 52, 108, 0.35);
-  }
-
-  .tile.next-priority.tier-hot {
-    --tile-accent: var(--state-hot);
-    --tile-accent-fg: var(--state-hot-fg);
-    --tile-accent-glow: rgba(250, 204, 21, 0.4);
-  }
-
-  /* Cold / plain Standby picked for "Switch to Auto": the tile's own grey,
-     the same own-colour ring + soft halo a Waiting tile gets — no yellow. */
-  .tile.next-priority.tier-cold {
-    --tile-accent: var(--state-cold);
-    --tile-accent-fg: var(--state-cold-fg);
-    --tile-accent-glow: rgba(107, 114, 128, 0.35);
+      0 0 0 6px var(--next-accent-glow);
   }
 
   /* Text sits above the heating fill (which is absolutely positioned and
@@ -251,8 +219,8 @@
     left: -0.6rem;
     padding: 0.15rem 0.6rem;
     border-radius: 999px;
-    background: var(--tile-accent, var(--opelka-blue));
-    color: var(--tile-accent-fg, #ffffff);
+    background: var(--next-accent);
+    color: var(--next-accent-fg);
     font-size: 0.7rem;
     font-weight: 700;
     text-transform: uppercase;
@@ -261,10 +229,12 @@
     z-index: 1;
   }
 
+  /* Large but regular weight (not bold) — the tile colour pair (--tile-fg)
+     keeps it readable: white on the dark tiles, dark on Hot / Heating. */
   .unit {
     align-self: start;
     font-size: var(--font-tile-unit);
-    font-weight: 800;
+    font-weight: 400;
     line-height: 1;
   }
 

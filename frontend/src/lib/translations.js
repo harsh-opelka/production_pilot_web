@@ -17,16 +17,17 @@ const en = {
   block_view: 'Block View',
   list_view: 'List View',
   // Small label on top of the two-tier Next Action box (see TopBar.svelte);
-  // the larger text below it is built from the next_action_* keys below.
+  // below it: the machine number in a badge, then one of the
+  // next_action_* texts below (no number in them — see nextAction.js).
   next_action_prefix: 'Next Action',
   // One key per backend Next Action kind (priority.select_next_action,
   // mapped in nextAction.js): Error, then Standby — shown as Cold, Hot or
   // Standby (not in auto mode -> switch it) — then Waiting (empty -> load
   // it), then Almost finished (unload soon).
-  next_action_error: '{unit}: Check Error',
-  next_action_switch_to_auto: '{unit}: Switch to Auto',
-  next_action_load: '{unit}: Load Machine',
-  next_action_near_completion: '{unit}: Unload Soon',
+  next_action_error: 'Check Error',
+  next_action_switch_to_auto: 'Switch to Auto',
+  next_action_load: 'Load Machine',
+  next_action_near_completion: 'Unload Soon',
   // Screen-reader text for the smiley shown when there's nothing to do
   // right now (all baking, or Waiting machines held back by Heating).
   next_action_nothing_to_do: 'Nothing to do right now',
@@ -278,13 +279,13 @@ const de = {
   auth_gate_prompt: 'Passwort eingeben:',
   auth_gate_incorrect: 'Falsches Passwort.',
   // Overrides de_v1's old "{group} — {fryer}" format (single-line pill) —
-  // the two-tier box now shows a plain label here and "{unit}: action"
+  // the two-tier box now shows a plain label here and "[unit] action"
   // below it (see next_action_prefix/error/load/near_completion above).
   next_action_prefix: 'Nächste Aktion',
-  next_action_error: '{unit}: Störung prüfen',
-  next_action_load: '{unit}: Beladen',
-  next_action_switch_to_auto: '{unit}: Auf Auto stellen',
-  next_action_near_completion: '{unit}: Bald entladen',
+  next_action_error: 'Störung prüfen',
+  next_action_load: 'Beladen',
+  next_action_switch_to_auto: 'Auf Auto stellen',
+  next_action_near_completion: 'Bald entladen',
   next_action_nothing_to_do: 'Gerade nichts zu tun',
   tile_next_badge: 'Nächste',
   state_hot: 'Heiß',

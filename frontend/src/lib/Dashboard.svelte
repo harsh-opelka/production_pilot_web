@@ -11,7 +11,7 @@
   import TvIcon from './TvIcon.svelte';
 
   // Same describeNextAction() call TopBar.svelte uses for the Next Action
-  // banner text/colour — reused here (not re-derived) purely to know which
+  // banner text — reused here (not re-derived) purely to know which
   // single plc.ip gets the NEXT badge, see MachineGroupSection.
   let nextAction = $derived(describeNextAction($machinesState.next_action, $lang));
 
@@ -139,7 +139,6 @@
               mode="block"
               language={$lang}
               nextActionIp={nextAction.ip}
-              nextActionTier={nextAction.tier}
               floor
               orientation={item.orientation}
             />
@@ -155,7 +154,6 @@
         language={$lang}
         {productivityByIp}
         nextActionIp={nextAction.ip}
-        nextActionTier={nextAction.tier}
       />
     {/each}
   </div>

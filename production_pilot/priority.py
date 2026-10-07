@@ -93,11 +93,9 @@ def select_next_action(plcs: list[PlcData], group_by_ip: dict[str, str] | None =
     LOAD_BLOCKED_WHILE_GROUP_HEATING: a Waiting machine whose group has an
     online Heating machine is skipped, as if it had nothing to do.
 
-    Returns {"kind", "ip", "unit_number", "state"} — state is the chosen
-    PLC's (derived) MachineState name, which the frontend colours the
-    banner / NEXT badge by. When nothing is actionable, kind is
-    ACTION_NOTHING_TO_DO (the smiley banner) if at least one machine is
-    online, otherwise ACTION_NONE; ip, unit_number and state are None
+    Returns {"kind", "ip", "unit_number"}. When nothing is actionable,
+    kind is ACTION_NOTHING_TO_DO (the smiley banner) if at least one
+    machine is online, otherwise ACTION_NONE; ip and unit_number are None
     in both cases.
     """
     group_of = (lambda plc: group_by_ip.get(plc.ip)) if group_by_ip is not None else (lambda plc: None)
@@ -115,8 +113,8 @@ def select_next_action(plcs: list[PlcData], group_by_ip: dict[str, str] | None =
     for tier in _TIERS:
         for plc, kind in kinds:
             if kind in tier:
-                return {"kind": kind, "ip": plc.ip, "unit_number": plc.unit_number, "state": plc.state.name}
+                return {"kind": kind, "ip": plc.ip, "unit_number": plc.unit_number}
 
     if any(plc.is_online for plc in plcs):
-        return {"kind": ACTION_NOTHING_TO_DO, "ip": None, "unit_number": None, "state": None}
-    return {"kind": ACTION_NONE, "ip": None, "unit_number": None, "state": None}
+        return {"kind": ACTION_NOTHING_TO_DO, "ip": None, "unit_number": None}
+    return {"kind": ACTION_NONE, "ip": None, "unit_number": None}
