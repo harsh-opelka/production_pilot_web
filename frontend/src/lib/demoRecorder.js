@@ -1,45 +1,57 @@
 import { writable, get } from 'svelte/store';
-import { uploadDemoVideo } from './serviceApi.js';
-import { demoStatus, showDemoMessage, formatClock, describeUploadError, isRetryableUploadError } from './demoMode.js';
+import { startDemoUpload, uploadDemoChunk, finalizeDemoUpload } from './serviceApi.js';
+import {
+  demoStatus,
+  loadDemoStatus,
+  showDemoMessage,
+  formatClock,
+  describeUploadError,
+  isRetryableUploadError,
+} from './demoMode.js';
 
 // Records the CURRENT TAB (getDisplayMedia + preferCurrentTab) with
-// MediaRecorder and uploads it as the demo when stopped. Module-level
-// state, not component state: recording keeps running while the user
-// moves between Dashboard / Statistics / Service (same tab, no reload).
+// MediaRecorder. Module-level state, not component state: recording keeps
+// running while the user moves between Dashboard / Statistics / Service
+// (same tab, no reload).
 //
-// Every recording starts from a clean slate (previous stream stopped, new
-// MediaRecorder, empty chunks, old download URL revoked). If saving fails,
-// the recording is NOT lost: it stays in memory (phase 'failed') with
-// "Retry saving" and "Download recording" until it is saved or a new
-// recording replaces it. A page reload ends a recording without uploading
-// anything, so the server's current demo is never touched by it.
+// The recording is NOT held in browser memory: every CHUNK_MS the chunk is
+// uploaded to the server (an upload session, appended in order to a temp
+// file). Only chunks not sent yet stay in memory (failed chunks are retried
+// a few times, then again with the next chunk). Stop sends the rest and
+// finalizes on the server (validate, seek fix, atomic switch). If that
+// fails, the file stays on the server and "Retry saving" retries the
+// finalize. A page reload / lost connection never finalizes, so the
+// current demo is untouched; the partial file is removed on the next start.
+//
+// The limits (max duration, warning, max size) come from the server
+// (GET /api/demo/status) — production_pilot/demo_video.py defines them.
 
-// Safety limits (the backend enforces the same — production_pilot/demo_video.py).
-export const MAX_DURATION_MS = 10 * 60 * 1000;
-export const MAX_SIZE_BYTES = 500 * 1024 * 1024;
-// Stop a little before the hard size limit so the finished file fits.
-const SIZE_STOP_BYTES = MAX_SIZE_BYTES - 16 * 1024 * 1024;
-const VIDEO_BITS_PER_SECOND = 4_000_000;
+const VIDEO_BITS_PER_SECOND = 2_500_000;
 const FRAME_RATE = 30;
-const CHUNK_MS = 1000;
+const CHUNK_MS = 5000;
+const CHUNK_RETRY_DELAYS_MS = [1000, 2000, 4000];
 const AUTO_RETRY_DELAY_MS = 2000;
+// Stop a little before the hard size limit so the finished file fits.
+const SIZE_MARGIN_BYTES = 16 * 1024 * 1024;
 
-// phase: 'idle' | 'prompt' (browser share dialog open) | 'recording' |
-//        'saving' (progress 0..1) | 'failed' (error = { key, vars })
-export const recorder = writable({ phase: 'idle', startedAt: null, progress: null, error: null });
+// phase: 'idle' | 'prompt' (checks + browser share dialog) | 'recording'
+//        (maxSeconds) | 'saving' (progress 0..1, null = finalizing) |
+//        'failed' (error = { key, vars })
+export const recorder = writable({ phase: 'idle', startedAt: null, maxSeconds: null, progress: null, error: null });
 
 let stream = null;
 let mediaRecorder = null;
-let chunks = [];
-let bytes = 0;
 let startedAt = 0;
 let stopReason = 'user';
 let limitTimer = null;
-let pending = null; // { blob, durationSeconds, reason } — a recording not saved yet
-let downloadUrl = null;
+let warnTimer = null;
+// The upload of the current / unsaved recording:
+// { id, queue: Blob[], sentBytes, queuedBytes, pumping, error, stopAtBytes,
+//   maxSeconds, durationSeconds, reason }
+let session = null;
 
 function setPhase(phase, extra = {}) {
-  recorder.set({ phase, startedAt: null, progress: null, error: null, ...extra });
+  recorder.set({ phase, startedAt: null, maxSeconds: null, progress: null, error: null, ...extra });
 }
 
 function pickMimeType() {
@@ -52,28 +64,98 @@ function releaseStream() {
   stream = null;
 }
 
-function revokeDownloadUrl() {
-  if (downloadUrl) URL.revokeObjectURL(downloadUrl);
-  downloadUrl = null;
+function clearTimers() {
+  clearTimeout(limitTimer);
+  clearTimeout(warnTimer);
+  limitTimer = warnTimer = null;
 }
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Leaving/reloading the page while recording (or with an unsaved recording) loses it — warn.
 function onBeforeUnload(event) {
   event.preventDefault();
 }
 
+function errorText(err) {
+  return `${err?.name ?? 'Error'}: ${err?.message ?? err}`;
+}
+
+/** The limits from the server (loaded once if the status isn't there yet). */
+async function serverLimits() {
+  if (!get(demoStatus).max_duration_seconds) await loadDemoStatus();
+  const status = get(demoStatus);
+  if (!status.max_duration_seconds) throw new Error('Server not reachable');
+  return status;
+}
+
+// --- chunk upload -------------------------------------------------------------
+
+function progressOf(job) {
+  const total = job.sentBytes + job.queuedBytes;
+  return total ? job.sentBytes / total : 1;
+}
+
+async function sendChunk(job, blob) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await uploadDemoChunk(job.id, job.sentBytes, blob);
+      return;
+    } catch (err) {
+      const retryable = isRetryableUploadError(err) || err?.status >= 500;
+      if (!retryable || attempt >= CHUNK_RETRY_DELAYS_MS.length) throw err;
+      await sleep(CHUNK_RETRY_DELAYS_MS[attempt]);
+    }
+  }
+}
+
+async function drain(job) {
+  try {
+    while (job.queue.length && session === job) {
+      const blob = job.queue[0];
+      await sendChunk(job, blob);
+      job.queue.shift();
+      job.sentBytes += blob.size;
+      job.queuedBytes -= blob.size;
+      job.error = null;
+      recorder.update((r) => (r.phase === 'saving' ? { ...r, progress: progressOf(job) } : r));
+    }
+  } catch (err) {
+    job.error = err; // chunks stay queued; the next chunk / Stop tries again
+    console.error('[demo] uploading a chunk failed:', err);
+  }
+}
+
+/** Sends the queued chunks in order; one sender at a time per session. */
+function pump(job) {
+  if (!job.pumping) job.pumping = drain(job).finally(() => (job.pumping = null));
+  return job.pumping;
+}
+
+// --- recording ----------------------------------------------------------------
+
 export async function startRecording() {
   const phase = get(recorder).phase;
   if (phase !== 'idle' && phase !== 'failed') return;
-  // Clean slate: a new recording replaces an unsaved one.
-  pending = null;
-  revokeDownloadUrl();
+  // Clean slate: a new recording replaces an unsaved one (the server removes its file).
+  session = null;
+  clearTimers();
   releaseStream();
   mediaRecorder = null;
-  chunks = [];
-  bytes = 0;
   window.removeEventListener('beforeunload', onBeforeUnload);
   setPhase('prompt');
+
+  let limits;
+  let sessionId;
+  try {
+    limits = await serverLimits();
+    ({ session_id: sessionId } = await startDemoUpload()); // also checks the free disk space
+  } catch (err) {
+    setPhase('idle');
+    if (err?.status === 507) showDemoMessage('demo_disk_full', { detail: err.message.replace(/^HTTP 507: /, '') }, 20000);
+    else showDemoMessage('demo_record_failed', { error: errorText(err) });
+    return;
+  }
 
   try {
     stream = await navigator.mediaDevices.getDisplayMedia({
@@ -87,7 +169,7 @@ export async function startRecording() {
   } catch (err) {
     setPhase('idle');
     if (err?.name === 'NotAllowedError' || err?.name === 'AbortError') showDemoMessage('demo_record_cancelled');
-    else showDemoMessage('demo_record_failed', { error: `${err?.name ?? 'Error'}: ${err?.message ?? err}` });
+    else showDemoMessage('demo_record_failed', { error: errorText(err) });
     return;
   }
 
@@ -97,27 +179,50 @@ export async function startRecording() {
   } catch (err) {
     releaseStream();
     setPhase('idle');
-    showDemoMessage('demo_record_failed', { error: `${err?.name ?? 'Error'}: ${err?.message ?? err}` });
+    showDemoMessage('demo_record_failed', { error: errorText(err) });
     return;
   }
+
+  const maxSeconds = limits.max_duration_seconds;
+  const warnSeconds = limits.duration_warning_seconds;
+  const job = {
+    id: sessionId,
+    queue: [],
+    sentBytes: 0,
+    queuedBytes: 0,
+    pumping: null,
+    error: null,
+    stopAtBytes: limits.max_size_bytes - SIZE_MARGIN_BYTES,
+    maxSeconds,
+    durationSeconds: 0,
+    reason: 'user',
+  };
+  session = job;
 
   const recorderForThisRun = mediaRecorder;
   stopReason = 'user';
   recorderForThisRun.ondataavailable = (event) => {
-    if (!event.data?.size || recorderForThisRun !== mediaRecorder) return;
-    chunks.push(event.data);
-    bytes += event.data.size;
-    if (bytes >= SIZE_STOP_BYTES) stopRecording('size');
+    if (!event.data?.size || recorderForThisRun !== mediaRecorder || session !== job) return;
+    job.queue.push(event.data);
+    job.queuedBytes += event.data.size;
+    pump(job);
+    if (job.sentBytes + job.queuedBytes >= job.stopAtBytes) stopRecording('size');
   };
-  recorderForThisRun.onstop = () => finish(recorderForThisRun);
+  recorderForThisRun.onstop = () => finish(recorderForThisRun, job);
   // The browser's own "Stop sharing" bar ends the capture -> save it.
   stream.getVideoTracks()[0]?.addEventListener('ended', () => stopRecording('user'));
 
   recorderForThisRun.start(CHUNK_MS);
   startedAt = performance.now();
-  limitTimer = setTimeout(() => stopRecording('duration'), MAX_DURATION_MS);
+  limitTimer = setTimeout(() => stopRecording('duration'), maxSeconds * 1000);
+  if (warnSeconds > 0 && warnSeconds < maxSeconds) {
+    warnTimer = setTimeout(
+      () => showDemoMessage('demo_autostop_warning', { minutes: Math.round(warnSeconds / 60) }, warnSeconds * 1000),
+      (maxSeconds - warnSeconds) * 1000,
+    );
+  }
   window.addEventListener('beforeunload', onBeforeUnload);
-  setPhase('recording', { startedAt: Date.now() });
+  setPhase('recording', { startedAt: Date.now(), maxSeconds });
 }
 
 export function stopRecording(reason = 'user') {
@@ -126,68 +231,57 @@ export function stopRecording(reason = 'user') {
   mediaRecorder.stop(); // -> final dataavailable, then onstop -> finish()
 }
 
-function finish(stoppedRecorder) {
-  if (stoppedRecorder !== mediaRecorder) return; // a stale recorder from an earlier run
-  clearTimeout(limitTimer);
-  const durationSeconds = Math.min((performance.now() - startedAt) / 1000, MAX_DURATION_MS / 1000);
+function finish(stoppedRecorder, job) {
+  if (stoppedRecorder !== mediaRecorder || session !== job) return; // a stale recorder from an earlier run
+  clearTimers();
+  job.durationSeconds = Math.min((performance.now() - startedAt) / 1000, job.maxSeconds);
+  job.reason = stopReason;
   releaseStream();
-  const blob = new Blob(chunks, { type: 'video/webm' });
-  chunks = [];
-  bytes = 0;
   mediaRecorder = null;
-  if (!blob.size) {
+  if (!job.sentBytes && !job.queuedBytes) {
+    session = null;
     window.removeEventListener('beforeunload', onBeforeUnload);
     setPhase('idle');
     showDemoMessage('demo_save_failed_reason', { reason: 'empty recording' });
     return;
   }
-  pending = { blob, durationSeconds, reason: stopReason };
-  save(true);
+  save(job, true);
 }
 
-async function save(autoRetry) {
-  if (!pending) return;
-  const job = pending;
-  setPhase('saving', { progress: 0 });
+async function save(job, autoRetry) {
+  if (session !== job) return;
+  setPhase('saving', { progress: progressOf(job) });
   try {
-    const status = await uploadDemoVideo(job.blob, job.durationSeconds, (p) =>
-      recorder.update((r) => (r.phase === 'saving' ? { ...r, progress: p } : r)),
-    );
-    if (pending !== job) return;
-    pending = null;
-    revokeDownloadUrl();
+    // Send what is still queued (each chunk with its own retries).
+    while (job.queue.length) {
+      job.error = null;
+      await pump(job);
+      if (session !== job) return;
+      if (job.error && job.queue.length) throw job.error;
+    }
+    recorder.update((r) => (r.phase === 'saving' ? { ...r, progress: null } : r)); // finalizing on the server
+    const status = await finalizeDemoUpload(job.id, job.durationSeconds);
+    if (session !== job) return;
+    session = null;
     window.removeEventListener('beforeunload', onBeforeUnload);
     demoStatus.set({ ...status, loaded: true });
     setPhase('idle');
     const length = formatClock(status.duration_seconds ?? job.durationSeconds);
     const key = job.reason === 'duration' ? 'demo_autostop_duration' : job.reason === 'size' ? 'demo_autostop_size' : 'demo_saved';
-    showDemoMessage(key, { length });
+    showDemoMessage(key, { length, minutes: Math.round(job.maxSeconds / 60) });
   } catch (err) {
-    if (pending !== job) return;
+    if (session !== job) return;
     console.error('[demo] saving the recording failed:', err);
     if (autoRetry && isRetryableUploadError(err)) {
-      await new Promise((resolve) => setTimeout(resolve, AUTO_RETRY_DELAY_MS));
-      if (pending === job) save(false); // retry once automatically on a network error
+      await sleep(AUTO_RETRY_DELAY_MS);
+      if (session === job) save(job, false); // retry once automatically on a network error
       return;
     }
-    setPhase('failed', { error: describeUploadError(err) }); // recording kept: Retry / Download
+    setPhase('failed', { error: describeUploadError(err) }); // file kept on the server: Retry saving
   }
 }
 
-/** "Retry saving" after a failed save (retries once more on a network error). */
+/** "Retry saving" after a failed save: sends any unsent chunks, then retries the finalize step. */
 export function retrySave() {
-  if (get(recorder).phase === 'failed') save(true);
-}
-
-/** "Download recording": saves the unsaved recording as a file, as a fallback. */
-export function downloadRecording() {
-  if (!pending) return;
-  revokeDownloadUrl();
-  downloadUrl = URL.createObjectURL(pending.blob);
-  const a = document.createElement('a');
-  a.href = downloadUrl;
-  a.download = `produktionspilot-demo-${new Date().toISOString().replace(/[:.]/g, '-')}.webm`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+  if (get(recorder).phase === 'failed' && session) save(session, true);
 }

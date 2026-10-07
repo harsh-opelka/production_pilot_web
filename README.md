@@ -71,7 +71,8 @@ general-purpose browser.
 
 ### Limits
 
-- Max 10 minutes per recording (auto-stop + save), max 500 MB.
+- Max 30 minutes per recording (warning at 28 min, auto-stop + save), max 1 GB; needs 2 GB free disk space to start.
+  Chunks are uploaded every ~5 s while recording; Stop finalizes the file on the server.
 - A page reload during recording ends it without saving; the current demo
   stays untouched (it is only switched after a new recording was uploaded and
   checked).

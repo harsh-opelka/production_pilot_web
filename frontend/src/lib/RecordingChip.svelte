@@ -7,7 +7,7 @@
   import { formatClock } from './demoMode.js';
   import { recorder, stopRecording } from './demoRecorder.js';
 
-  let time = $derived($recorder.startedAt ? formatClock(($nowTick - $recorder.startedAt) / 1000) : '');
+  let time = $derived($recorder.startedAt ? `${formatClock(($nowTick - $recorder.startedAt) / 1000)} / ${formatClock($recorder.maxSeconds)}` : '');
 </script>
 
 {#if $recorder.phase === 'recording' && $page !== 'dashboard'}

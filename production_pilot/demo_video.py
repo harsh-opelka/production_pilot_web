@@ -32,13 +32,18 @@ from pathlib import Path
 
 DEMO_DIR = Path(__file__).resolve().parent.parent / "data" / "demo"
 
-#: Safety limits for one recording (also enforced in the frontend).
-MAX_DURATION_SECONDS = 10 * 60
-MAX_SIZE_BYTES = 500 * 1024 * 1024
+#: Safety limits for one recording. The ONLY definition: the frontend gets
+#: them from GET /api/demo/status (see limits()).
+MAX_DURATION_SECONDS = 30 * 60
+#: The recorder warns this long before the automatic stop.
+DURATION_WARNING_SECONDS = 2 * 60
+MAX_SIZE_BYTES = 1024 * 1024 * 1024
+#: Free disk space required before a recording may start.
+MIN_FREE_DISK_BYTES = 2 * 1024 * 1024 * 1024
 #: The client's stopwatch and the recorder can disagree by a little.
 DURATION_GRACE_SECONDS = 5
 
-_FFMPEG_TIMEOUT_SECONDS = 300
+_FFMPEG_TIMEOUT_SECONDS = 600
 
 # EBML / Matroska element IDs (with their length-marker bits).
 _EBML = 0x1A45DFA3
@@ -58,6 +63,14 @@ _HEADER_SCAN_BYTES = 1024 * 1024
 
 class DemoVideoError(ValueError):
     """Invalid / unusable recording — the message is shown to the technician."""
+
+
+class DemoStorageError(DemoVideoError):
+    """Not enough free disk space, or the recording is over the size limit."""
+
+
+class DemoSessionError(DemoVideoError):
+    """Unknown / expired upload session, or a chunk at the wrong offset."""
 
 
 # --- EBML parsing -------------------------------------------------------------
@@ -357,12 +370,15 @@ def validate_duration(duration_seconds) -> float:
     return float(duration_seconds)
 
 
-def store(upload: Path, duration_seconds: float) -> dict:
+def store(upload: Path, duration_seconds: float, keep_upload_on_error: bool = False) -> dict:
     """Validates the uploaded temp file, makes it seekable, stores it as a
     new version and only then switches the pointer to it (the old current
     becomes "previous"). Temp files are always cleaned up; on any failure
-    the pointer - and so the demo being played - is unchanged. Returns status()."""
+    the pointer - and so the demo being played - is unchanged. Returns status().
+    keep_upload_on_error: leave `upload` in place when saving fails, so the
+    finalize step of a chunked upload can be retried."""
     seekable = upload.with_suffix(".seekable.webm")
+    ok = False
     try:
         validate(upload)
         if _remux(upload, seekable):
@@ -393,10 +409,99 @@ def store(upload: Path, duration_seconds: float) -> dict:
             for path in DEMO_DIR.glob("demo-*.webm"):
                 if path.name not in keep:
                     _try_unlink(path)  # versions older than "previous"
+        ok = True
         return status()
     finally:
-        _try_unlink(upload)
+        if ok or not keep_upload_on_error:
+            _try_unlink(upload)
         _try_unlink(seekable)
+
+
+# --- chunked upload sessions -------------------------------------------------
+#
+# The browser uploads the recording WHILE recording (MediaRecorder timeslice
+# chunks), appended in order to .session-<id>.webm next to the demos. Each
+# chunk carries its byte offset, so a retried chunk that already arrived is
+# recognised (no duplicates) and nothing has to be kept in server memory -
+# a session survives a server restart. On Stop, finalize_session() runs
+# store() on the file. A recording that is never finalized (page closed,
+# connection lost) never touches the pointer; its temp file is removed when
+# the next recording starts (or by cleanup_orphans() at server start).
+
+_SESSION_PREFIX = ".session-"
+_session_lock = threading.Lock()
+
+
+def limits() -> dict:
+    return {
+        "max_duration_seconds": MAX_DURATION_SECONDS,
+        "duration_warning_seconds": DURATION_WARNING_SECONDS,
+        "max_size_bytes": MAX_SIZE_BYTES,
+        "min_free_disk_bytes": MIN_FREE_DISK_BYTES,
+    }
+
+
+def free_disk_bytes() -> int:
+    DEMO_DIR.mkdir(parents=True, exist_ok=True)
+    return shutil.disk_usage(DEMO_DIR).free
+
+
+def _session_path(session_id: str) -> Path:
+    if not (isinstance(session_id, str) and len(session_id) == 32 and all(c in "0123456789abcdef" for c in session_id)):
+        raise DemoSessionError("Invalid upload session")
+    return DEMO_DIR / f"{_SESSION_PREFIX}{session_id}.webm"
+
+
+def start_session() -> str:
+    """Removes partial files of earlier (abandoned) sessions, checks the free
+    disk space and creates an empty session file. Returns the session id."""
+    with _session_lock:
+        DEMO_DIR.mkdir(parents=True, exist_ok=True)
+        for path in [*DEMO_DIR.glob(f"{_SESSION_PREFIX}*"), *DEMO_DIR.glob(".upload-*")]:
+            _try_unlink(path)
+        free = free_disk_bytes()
+        if free < MIN_FREE_DISK_BYTES:
+            gb = 1024 ** 3
+            raise DemoStorageError(
+                f"Not enough free disk space on the server: {free / gb:.1f} GB free, "
+                f"at least {MIN_FREE_DISK_BYTES / gb:.0f} GB needed"
+            )
+        session_id = uuid.uuid4().hex
+        _session_path(session_id).touch()
+        return session_id
+
+
+def append_chunk(session_id: str, offset: int, data: bytes) -> int:
+    """Appends `data` at byte `offset` of the session file. A chunk that is
+    already there (a retry whose answer got lost) is accepted without being
+    written twice. Returns the new file size."""
+    path = _session_path(session_id)
+    with _session_lock:
+        if not path.is_file():
+            raise DemoSessionError("Upload session expired - start a new recording")
+        size = path.stat().st_size
+        if offset + len(data) <= size:
+            return size  # duplicate (retry)
+        if offset != size:
+            raise DemoSessionError(f"Chunk at offset {offset}, but the server has {size} bytes")
+        if size + len(data) > MAX_SIZE_BYTES:
+            raise DemoStorageError(f"Recording larger than {MAX_SIZE_BYTES // (1024 * 1024)} MB")
+        with path.open("ab") as f:
+            f.write(data)
+        return size + len(data)
+
+
+def finalize_session(session_id: str, duration_seconds) -> dict:
+    """Validates and stores the session's file (store(): seek fix, atomic
+    pointer switch). On failure the file is kept so this can be retried."""
+    path = _session_path(session_id)
+    duration = validate_duration(duration_seconds)
+    with _session_lock:
+        if not path.is_file():
+            raise DemoSessionError("Upload session expired - start a new recording")
+        if path.stat().st_size == 0:
+            raise DemoVideoError("The recording is empty")
+    return store(path, duration, keep_upload_on_error=True)
 
 
 def status() -> dict:
@@ -406,8 +511,9 @@ def status() -> dict:
     current, previous = pointer["current"], pointer["previous"]
     if current is None:
         return {"exists": False, "duration_seconds": None, "size_bytes": None, "recorded_at": None,
-                "version": None, "has_previous": False}
+                "version": None, "has_previous": False, **limits()}
     return {
+        **limits(),
         "exists": True,
         "duration_seconds": current.get("duration_seconds"),
         "size_bytes": current.get("size_bytes"),

@@ -57,7 +57,23 @@
     }
     lastMode = mode;
   });
-  let seekable = $derived(Number.isFinite(duration) && duration > 0);
+  // The seek bar's range: the video's own duration, or (if the browser
+  // reports none / Infinity) the length the server stored for this version.
+  let knownDuration = $derived(
+    Number.isFinite(duration) && duration > 0 ? duration : which === 'current' ? Number($demoStatus.duration_seconds) : NaN,
+  );
+  let seekable = $derived(Number.isFinite(knownDuration) && knownDuration > 0);
+  // Release the media resource when the player goes away (no buffered
+  // 30-minute file kept alive by a detached element).
+  $effect(() => {
+    const el = video;
+    return () => {
+      if (!el) return;
+      el.pause();
+      el.removeAttribute('src');
+      el.load();
+    };
+  });
   // Messages normally show under the Demo button; when this screen can't
   // see the button (e.g. a reload fell back to Live), show them here.
   let toast = $derived(
@@ -206,7 +222,7 @@
       <input
         type="range"
         min="0"
-        max={seekable ? duration : 1}
+        max={seekable ? knownDuration : 1}
         step="0.1"
         value={seekable ? current : 0}
         disabled={!seekable}
@@ -215,7 +231,7 @@
         onchange={() => (seeking = false)}
         onpointerup={() => (seeking = false)}
       />
-      <span class="time">{seekable ? formatClock(duration) : '--:--'}</span>
+      <span class="time">{seekable ? formatClock(knownDuration) : '--:--'}</span>
     </div>
   </div>
 {/if}

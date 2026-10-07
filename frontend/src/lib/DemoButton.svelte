@@ -19,7 +19,7 @@
     menuEntries,
     formatClock,
   } from './demoMode.js';
-  import { recorder, startRecording, stopRecording, retrySave, downloadRecording } from './demoRecorder.js';
+  import { recorder, startRecording, stopRecording, retrySave } from './demoRecorder.js';
 
   let open = $state(false);
   let confirmReplace = $state(false);
@@ -30,7 +30,7 @@
   let support = recordSupport();
   let entries = $derived(menuEntries($recorder.phase, support));
   let recording = $derived($recorder.phase === 'recording');
-  let recTime = $derived(recording && $recorder.startedAt ? formatClock(($nowTick - $recorder.startedAt) / 1000) : '');
+  let recTime = $derived(recording && $recorder.startedAt ? `${formatClock(($nowTick - $recorder.startedAt) / 1000)} / ${formatClock($recorder.maxSeconds)}` : '');
 
   async function play() {
     if ($recorder.phase !== 'idle' && $recorder.phase !== 'failed') {
@@ -144,13 +144,12 @@
     {/if}
 
     {#if $recorder.phase === 'failed' && manage}
-      <!-- Saving failed: the recording is still in this browser. -->
+      <!-- Saving failed: the recording is kept on the server (Retry saving finalizes it). -->
       <div class="demo-msg failed" role="alert">
         <p>{translate($lang, 'demo_save_failed_kept')}</p>
         <p class="reason">{translate($lang, $recorder.error.key, $recorder.error.vars)}</p>
         <div class="failed-actions">
           <button type="button" class="primary" onclick={retrySave}>{translate($lang, 'demo_retry_save')}</button>
-          <button type="button" class="secondary" onclick={downloadRecording}>{translate($lang, 'demo_download')}</button>
         </div>
       </div>
     {:else if $recorder.phase === 'prompt'}

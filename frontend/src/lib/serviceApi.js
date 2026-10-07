@@ -216,16 +216,17 @@ export async function getLayout() {
   return res.json();
 }
 
-// Customer Demo Mode. The recording is sent as the raw WebM body (no
-// multipart); duration_seconds lets the backend write the seek index.
-// One upload function for the demo recording: XMLHttpRequest rather than
-// fetch for upload progress; a generous timeout and no AbortController /
-// keepalive (keepalive caps the body at 64 KB). Resolves with the demo
-// status; rejects with ServiceApiError("HTTP <status>: <server message>")
-// for an HTTP error, or UploadNetworkError when no response arrived at all.
+// Customer Demo Mode: chunked upload while recording. startDemoUpload()
+// opens a session on the server (checks free disk space), each
+// MediaRecorder chunk is PUT at its byte offset (a retried chunk that
+// already arrived is ignored by the server), finalizeDemoUpload() makes it
+// the demo. XMLHttpRequest with a timeout; resolves with the JSON answer,
+// rejects with ServiceApiError("HTTP <status>: <server message>") for an
+// HTTP error, or UploadNetworkError when no response arrived at all.
 // A 401 does NOT log out here (unlike serviceFetch): the unsaved recording
 // must stay on screen so it can be retried after logging in again.
-export const DEMO_UPLOAD_TIMEOUT_MS = 15 * 60 * 1000;
+export const DEMO_CHUNK_TIMEOUT_MS = 60 * 1000;
+export const DEMO_FINALIZE_TIMEOUT_MS = 15 * 60 * 1000;
 
 export class UploadNetworkError extends Error {
   constructor(kind) {
@@ -235,17 +236,14 @@ export class UploadNetworkError extends Error {
   }
 }
 
-export function uploadDemoVideo(blob, durationSeconds, onProgress) {
+function demoRequest(method, url, body, timeoutMs) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', `/api/demo/video?duration_seconds=${encodeURIComponent(durationSeconds.toFixed(2))}`);
-    xhr.timeout = DEMO_UPLOAD_TIMEOUT_MS;
-    xhr.setRequestHeader('Content-Type', 'video/webm');
+    xhr.open(method, url);
+    xhr.timeout = timeoutMs;
+    if (body) xhr.setRequestHeader('Content-Type', 'video/webm');
     const { token } = get(auth);
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-    xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable) onProgress?.(event.loaded / event.total);
-    };
     xhr.onload = () => {
       let data = null;
       try {
@@ -258,8 +256,23 @@ export function uploadDemoVideo(blob, durationSeconds, onProgress) {
     };
     xhr.onerror = () => reject(new UploadNetworkError('network'));
     xhr.ontimeout = () => reject(new UploadNetworkError('timeout'));
-    xhr.send(blob);
+    xhr.send(body ?? null);
   });
+}
+
+/** -> { session_id }; HTTP 507 = not enough free disk space on the server. */
+export function startDemoUpload() {
+  return demoRequest('POST', '/api/demo/upload', null, DEMO_CHUNK_TIMEOUT_MS);
+}
+
+export function uploadDemoChunk(sessionId, offset, blob) {
+  return demoRequest('PUT', `/api/demo/upload/${sessionId}?offset=${offset}`, blob, DEMO_CHUNK_TIMEOUT_MS);
+}
+
+/** -> the demo status. Can be retried after a failure (the file stays on the server). */
+export function finalizeDemoUpload(sessionId, durationSeconds) {
+  const url = `/api/demo/upload/${sessionId}/finalize?duration_seconds=${encodeURIComponent(durationSeconds.toFixed(2))}`;
+  return demoRequest('POST', url, null, DEMO_FINALIZE_TIMEOUT_MS);
 }
 
 export function deleteDemoVideo() {

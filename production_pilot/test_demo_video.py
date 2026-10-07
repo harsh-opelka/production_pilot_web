@@ -107,11 +107,11 @@ def test_file_handling(tmp: Path) -> list[bool]:
     sk = tmp / "seekhead.webm"
     sk.write_bytes(make_webm(seekhead=True))
     r.append(_check("SeekHead present -> refuses to shift offsets", _raises(demo_video.fix_duration, sk, tmp / "x.webm", 5.0), True))
-    r.append(_check("limits are named constants (10 min / 500 MB)",
-                    (demo_video.MAX_DURATION_SECONDS, demo_video.MAX_SIZE_BYTES), (600, 500 * 1024 * 1024)))
-    r.append(_check("duration limits: 0 and > 10 min rejected, 600 s accepted",
-                    (_raises(demo_video.validate_duration, 0), _raises(demo_video.validate_duration, 700),
-                     demo_video.validate_duration(600)), (True, True, 600.0)))
+    r.append(_check("limits are named constants (30 min / 1 GB)",
+                    (demo_video.MAX_DURATION_SECONDS, demo_video.MAX_SIZE_BYTES), (1800, 1024 * 1024 * 1024)))
+    r.append(_check("duration limits: 0 and > 30 min rejected, 1800 s accepted",
+                    (_raises(demo_video.validate_duration, 0), _raises(demo_video.validate_duration, 1900),
+                     demo_video.validate_duration(1800)), (True, True, 1800.0)))
     return r
 
 
@@ -225,7 +225,7 @@ def test_endpoints(tmp: Path) -> list[bool]:
     for label, kwargs, code in (
         ("invalid file -> 422", dict(url=url, content=b"broken" * 100, headers={**up, **service}), 422),
         ("missing duration -> 422", dict(url="/api/demo/video", content=webm, headers={**up, **service}), 422),
-        ("duration > 10 min -> 422", dict(url="/api/demo/video?duration_seconds=700", content=webm, headers={**up, **service}), 422),
+        ("duration > 30 min -> 422", dict(url="/api/demo/video?duration_seconds=1900", content=webm, headers={**up, **service}), 422),
         ("empty body -> 422", dict(url=url, content=b"", headers={**up, **service}), 422),
         ("wrong content type -> 415", dict(url=url, content=webm, headers={"Content-Type": "image/png", **service}), 415),
     ):

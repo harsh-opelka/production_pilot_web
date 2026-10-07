@@ -1355,6 +1355,56 @@ async def upload_demo_video(
         upload.unlink(missing_ok=True)
 
 
+@app.post("/api/demo/upload")
+def start_demo_upload(_token: str = Depends(require_level("service"))):
+    """Starts a chunked upload session (before recording): removes partial
+    files of abandoned sessions and checks the free disk space (507 if too
+    little). Returns {"session_id"}."""
+    try:
+        return {"session_id": demo_video.start_session()}
+    except demo_video.DemoStorageError as exc:
+        return _demo_error(507, str(exc))
+
+
+@app.put("/api/demo/upload/{session_id}")
+async def upload_demo_chunk(
+    session_id: str, request: Request, offset: int, _token: str = Depends(require_level("service"))
+):
+    """One MediaRecorder chunk (raw body, a few MB), appended at `offset`."""
+    try:
+        data = await request.body()
+    except ClientDisconnect:
+        return Response(status_code=400)
+    try:
+        size = await run_in_threadpool(demo_video.append_chunk, session_id, offset, data)
+    except demo_video.DemoStorageError as exc:
+        return _demo_error(413, str(exc))
+    except demo_video.DemoSessionError as exc:
+        return _demo_error(409, str(exc))
+    except OSError as exc:
+        return _demo_error(500, f"Writing the chunk failed: {type(exc).__name__}: {exc}")
+    return {"size": size}
+
+
+@app.post("/api/demo/upload/{session_id}/finalize")
+async def finalize_demo_upload(
+    session_id: str, duration_seconds: float | None = None, _token: str = Depends(require_level("service"))
+):
+    """Stop: validate, ffmpeg remux (or the duration fix), atomic pointer
+    switch, old versions deleted. On failure the uploaded file is kept so
+    this can be retried ("Retry saving"); the current demo is untouched."""
+    try:
+        await run_in_threadpool(demo_video.finalize_session, session_id, duration_seconds)
+    except demo_video.DemoSessionError as exc:
+        return _demo_error(409, str(exc))
+    except demo_video.DemoVideoError as exc:
+        return _demo_error(422, str(exc))
+    except Exception as exc:  # disk full, permissions, ... - old demo untouched
+        print(f"[demo] saving the recording failed: {type(exc).__name__}: {exc}")
+        return _demo_error(500, f"Saving failed on the server: {type(exc).__name__}: {exc}")
+    return _demo_status()
+
+
 @app.delete("/api/demo/video")
 def delete_demo_video(_token: str = Depends(require_level("service"))) -> dict:
     demo_video.delete()
