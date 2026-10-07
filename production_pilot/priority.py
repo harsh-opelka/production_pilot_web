@@ -20,8 +20,8 @@ NEAR_COMPLETION_THRESHOLD_SECONDS = 30
 # Next Action kinds, highest precedence first. The frontend maps each one
 # to its translated "<no>: ..." text and banner colour (nextAction.js).
 ACTION_ERROR = "error"                  # "<no>: Check Error"
-ACTION_LOAD = "load"                    # "<no>: Load Machine"   (WAITING)
 ACTION_SWITCH_TO_AUTO = "switch_to_auto"  # "<no>: Switch to Auto" (HOT)
+ACTION_LOAD = "load"                    # "<no>: Load Machine"   (WAITING)
 ACTION_UNLOAD_SOON = "unload_soon"      # "<no>: Unload Soon"    (Almost finished)
 # Nothing actionable:
 ACTION_ALL_BAKING = "all_baking"        # every online machine is Baking -> smiley
@@ -48,21 +48,20 @@ def _action_kind(plc: PlcData) -> str | None:
         return None
     if plc.state == MachineState.ERROR:
         return ACTION_ERROR
-    if plc.state == MachineState.WAITING:
-        return ACTION_LOAD
     if plc.state == MachineState.HOT:
         return ACTION_SWITCH_TO_AUTO
+    if plc.state == MachineState.WAITING:
+        return ACTION_LOAD
     if is_near_completion(plc):
         return ACTION_UNLOAD_SOON
     return None
 
 
-# Tiers, highest first. Kinds sharing a tier are decided by saved order
-# alone: Waiting ("Load Machine") and Hot ("Switch to Auto") are equally
-# urgent, so whichever ranks higher in the saved order wins.
+# Tiers, highest first. Within a tier, saved order decides.
 _TIERS = (
     (ACTION_ERROR,),
-    (ACTION_LOAD, ACTION_SWITCH_TO_AUTO),
+    (ACTION_SWITCH_TO_AUTO,),
+    (ACTION_LOAD,),
     (ACTION_UNLOAD_SOON,),
 )
 
@@ -72,12 +71,12 @@ def select_next_action(plcs: list[PlcData]) -> dict:
     `plcs` must be in saved priority order: groups in plc_config.json
     order, each group's PLCs in their saved order (default_priority).
 
-    Tier precedence beats saved order: Error, then Waiting ("Load
-    Machine") and Hot ("Switch to Auto") TOGETHER, then Almost finished
-    ("Unload Soon"). Within a tier, the PLC earliest in `plcs` wins — so
-    of a Waiting and a Hot machine, the higher-ranked one is next, and
-    either one beats an Almost-finished machine, even one
-    ranked higher in the saved order.
+    Tier precedence beats saved order: Error ("Check Error"), then Hot
+    ("Switch to Auto"), then Waiting ("Load Machine"), then Almost
+    finished ("Unload Soon"). Within a tier, the PLC earliest in `plcs`
+    wins — so a Hot machine beats every Waiting machine, even one ranked
+    higher in the saved order, and of several Hot machines the
+    highest-ranked one is next.
 
     Returns {"kind", "ip", "unit_number"}. When nothing is actionable,
     kind is ACTION_ALL_BAKING if there is at least one online machine and

@@ -20,11 +20,11 @@ const en = {
   // the larger text below it is built from the next_action_* keys below.
   next_action_prefix: 'Next Action',
   // One key per backend Next Action kind (priority.select_next_action,
-  // mapped in nextAction.js): Error, then Waiting (empty -> load it), then
-  // Hot (not in auto mode -> switch it), then Almost finished (unload soon).
+  // mapped in nextAction.js): Error, then Hot (not in auto mode -> switch
+  // it), then Waiting (empty -> load it), then Almost finished (unload soon).
   next_action_error: '{unit}: Check Error',
-  next_action_load: '{unit}: Load Machine',
   next_action_switch_to_auto: '{unit}: Switch to Auto',
+  next_action_load: '{unit}: Load Machine',
   next_action_near_completion: '{unit}: Unload Soon',
   // Screen-reader text for the smiley shown when every online machine is baking.
   next_action_all_baking: 'All machines baking',

@@ -58,15 +58,22 @@ checkAction('Error -> Check Error', pick('error', 2), {
   tier: 'error',
   ip: '10.0.0.2',
 });
-checkAction('Waiting -> Load Machine', pick('load', 3), {
-  text: { en: '3: Load Machine', de: '3: Beladen' },
-  tier: 'load',
-  ip: '10.0.0.3',
-});
 checkAction('Hot -> Switch to Auto', pick('switch_to_auto', 1), {
   text: { en: '1: Switch to Auto', de: '1: Auf Auto stellen' },
   tier: 'hot',
   ip: '10.0.0.1',
+});
+// Hot machine 4 beats Waiting machines 1 and 3 on the backend; the NEXT
+// badge follows the banner to machine 4.
+checkAction('Hot M4 over Waiting M1+M3 -> 4: Switch to Auto', pick('switch_to_auto', 4), {
+  text: { en: '4: Switch to Auto', de: '4: Auf Auto stellen' },
+  tier: 'hot',
+  ip: '10.0.0.4',
+});
+checkAction('Waiting -> Load Machine', pick('load', 3), {
+  text: { en: '3: Load Machine', de: '3: Beladen' },
+  tier: 'load',
+  ip: '10.0.0.3',
 });
 checkAction('Almost finished -> Unload Soon', pick('unload_soon', 4), {
   text: { en: '4: Unload Soon', de: '4: Bald entladen' },

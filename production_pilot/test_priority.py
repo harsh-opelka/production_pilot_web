@@ -80,13 +80,19 @@ def test_select_next_action() -> list[bool]:
     # The three examples from the spec (saved order 1, 2, 3, 4).
     results.append(_check("M1 almost finished, M3 Waiting -> 3: Load Machine",
                           pick(machines(ALMOST_DONE, HEATING, WAITING, COLD)), (ACTION_LOAD, 3)))
-    # Waiting and Hot share one tier: saved order decides between them.
+    # Hot always beats Waiting, whatever the saved order.
     results.append(_check("screen example: M1 Hot, M2 Heating, M3+M4 Waiting -> 1: Switch to Auto",
                           pick(machines(HOT, HEATING, WAITING, WAITING)), (ACTION_SWITCH_TO_AUTO, 1)))
-    results.append(_check("Hot ranked above Waiting -> Switch to Auto",
-                          pick(machines(BAKING_LONG, HOT, WAITING)), (ACTION_SWITCH_TO_AUTO, 2)))
-    results.append(_check("Waiting ranked above Hot -> Load Machine",
-                          pick(machines(BAKING_LONG, WAITING, HOT)), (ACTION_LOAD, 2)))
+    results.append(_check("M4 Hot, M1+M3 Waiting -> 4: Switch to Auto",
+                          pick(machines(WAITING, HEATING, WAITING, HOT)), (ACTION_SWITCH_TO_AUTO, 4)))
+    results.append(_check("M1 Hot, M3 Waiting -> 1: Switch to Auto",
+                          pick(machines(HOT, HEATING, WAITING)), (ACTION_SWITCH_TO_AUTO, 1)))
+    results.append(_check("Waiting ranked above Hot -> Hot still wins",
+                          pick(machines(BAKING_LONG, WAITING, HOT)), (ACTION_SWITCH_TO_AUTO, 3)))
+    results.append(_check("several Hot -> highest saved rank wins",
+                          pick(machines(WAITING, HOT, BAKING_LONG, HOT)), (ACTION_SWITCH_TO_AUTO, 2)))
+    results.append(_check("Waiting + Almost finished ranked higher -> Waiting wins",
+                          pick(machines(ALMOST_DONE, WAITING)), (ACTION_LOAD, 2)))
     results.append(_check("Hot + Almost finished ranked higher -> Hot wins",
                           pick(machines(ALMOST_DONE, BAKING_LONG, HOT)), (ACTION_SWITCH_TO_AUTO, 3)))
     results.append(_check("Error still beats a higher-ranked Hot",

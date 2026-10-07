@@ -3,7 +3,7 @@ import { formatUnitNumber } from './format.js';
 
 // Which machine the banner points at is decided ONCE, on the backend
 // (production_pilot/priority.select_next_action, sent as the state
-// payload's `next_action`): Error, then Waiting, then Hot, then Almost
+// payload's `next_action`): Error, then Hot, then Waiting, then Almost
 // finished, each in saved priority order. This file only turns that pick
 // into display text and a colour tier — it never re-ranks machines.
 //
@@ -11,8 +11,8 @@ import { formatUnitNumber } from './format.js';
 // (TopBar.svelte) and the NEXT badge accent (FryerTile.svelte).
 const KINDS = {
   error: ['next_action_error', 'error'],
-  load: ['next_action_load', 'load'],
   switch_to_auto: ['next_action_switch_to_auto', 'hot'],
+  load: ['next_action_load', 'load'],
   unload_soon: ['next_action_near_completion', 'near-completion'],
 };
 
