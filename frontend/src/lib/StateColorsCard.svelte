@@ -13,7 +13,7 @@
     STATE_COLOR_SLOTS,
     MIN_CONTRAST,
     applyStateColors,
-    bestText,
+    textForSlot,
     findSimilarPairs,
     loadStateColors,
     normalizeHex,
@@ -176,7 +176,7 @@
 {#if draft}
   <div class="slots" style={varsStyle(draft)}>
     {#each STATE_COLOR_SLOTS as slot, index (slot.key)}
-      {@const contrast = bestText(draft[slot.key])}
+      {@const contrast = textForSlot(slot.key, draft[slot.key])}
       <div class="slot">
         <div class="slot-head">
           <span class="name">{translate($lang, slot.labelKey)}</span>

@@ -84,6 +84,16 @@ export function bestTextColor(bg) {
   return bestText(bg).color;
 }
 
+// Slots whose tile text is always white, whatever the background — the
+// Baking and Almost finished tiles (by request). On mid greens the
+// luminance rule would pick dark text instead.
+export const WHITE_TEXT_SLOTS = ['baking', 'near_completion'];
+
+/** The text colour a slot's tiles actually use on `bg`, with its contrast ratio. */
+export function textForSlot(key, bg) {
+  return WHITE_TEXT_SLOTS.includes(key) ? { color: TEXT_LIGHT, ratio: contrastRatio(bg, TEXT_LIGHT) } : bestText(bg);
+}
+
 function toLab(hex) {
   const [r, g, b] = hexToRgb(hex).map(linear);
   const x = (r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047;
@@ -144,7 +154,7 @@ export function stateColorVars(colors) {
     const hex = normalizeHex(colors?.[key]);
     if (!hex) continue;
     vars[`--state-${css}`] = hex;
-    vars[`--state-${css}-fg`] = bestTextColor(hex);
+    vars[`--state-${css}-fg`] = textForSlot(key, hex).color;
   }
   return vars;
 }

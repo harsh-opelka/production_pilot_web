@@ -8,6 +8,7 @@ const {
   normalizeHex,
   bestText,
   bestTextColor,
+  textForSlot,
   contrastRatio,
   colorDistance,
   findSimilarPairs,
@@ -51,6 +52,16 @@ check('navy reaches 4.5:1 with its best text', bestText('#05346C').ratio >= MIN_
 // Mid grey: the best of white/dark still falls short -> Service shows a warning.
 check('mid grey #777777 stays below 4.5:1 -> warning', bestText('#777777').ratio < MIN_CONTRAST, true);
 
+// Baking / Almost finished: always white text (by request), even on a
+// green where the luminance rule alone would pick dark.
+check('Baking default green: luminance alone would pick dark', bestTextColor('#16A34A'), TEXT_DARK);
+for (const [key, bg] of [['baking', '#16A34A'], ['near_completion', '#15803D'], ['near_completion', '#9333EA']]) {
+  check(`${key} on ${bg} -> white text`, textForSlot(key, bg).color, TEXT_LIGHT);
+}
+check('white on Baking green is 3.3:1 (below 4.5 -> Service warns)', textForSlot('baking', '#16A34A').ratio.toFixed(1), '3.3');
+check('other slots keep the automatic choice (Hot yellow -> dark)', textForSlot('hot', '#FACC15').color, TEXT_DARK);
+check('CSS vars: Baking text white', stateColorVars({ baking: '#16A34A' })['--state-baking-fg'], TEXT_LIGHT);
+
 // Similar colours.
 check('threshold is a named constant (ΔE 18)', SIMILAR_COLOR_DELTA_E, 18);
 check('near-identical colours are ~0 apart', colorDistance('#16A34A', '#17A44B') < 1, true);
@@ -65,12 +76,14 @@ check('Cold and the Standby/Unknown fallback may share a grey (no warning)',
 
 // CSS variables.
 check('stateColorVars: background + automatic text colour, CSS slot names',
-  stateColorVars({ near_completion: '#facc15', waiting: '#05346C', bogus: '#000000' }),
+  stateColorVars({ hot: '#facc15', near_completion: '#9333ea', waiting: '#05346C', bogus: '#000000' }),
   {
     '--state-waiting': '#05346C',
     '--state-waiting-fg': TEXT_LIGHT,
-    '--state-near-completion': '#FACC15',
-    '--state-near-completion-fg': TEXT_DARK,
+    '--state-near-completion': '#9333EA',
+    '--state-near-completion-fg': TEXT_LIGHT,
+    '--state-hot': '#FACC15',
+    '--state-hot-fg': TEXT_DARK,
   });
 
 // HSV round trip (free picker).
