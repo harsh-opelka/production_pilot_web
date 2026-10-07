@@ -13,6 +13,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from .models import MachineGroup
+from .new_cycle import CycleStatus
 from .priority import is_near_completion, select_next_action
 
 
@@ -32,25 +33,33 @@ def _saved_order(group: MachineGroup) -> list:
     return sorted(group.plcs, key=lambda p: p.default_priority)
 
 
-def group_to_dict(group: MachineGroup) -> dict:
+def group_to_dict(group: MachineGroup, cycle: CycleStatus | None = None) -> dict:
     """Serializes a group with its plcs in SAVED priority order. Tile
     placement is the frontend's job (machine number within a group) and
-    never depends on live state, so tiles don't jump around."""
+    never depends on live state, so tiles don't jump around. new_cycle /
+    wait_remaining_seconds: the group's New Cycle state (new_cycle.py)."""
+    cycle = cycle or CycleStatus()
     return {
         "name": group.name,
         "type": group.type,
+        "new_cycle": cycle.new_cycle,
+        "wait_remaining_seconds": cycle.wait_remaining_seconds,
         "plcs": [_plc_to_dict(plc) for plc in _saved_order(group)],
     }
 
 
-def build_state(groups: list[MachineGroup], connected: bool) -> dict:
+def build_state(groups: list[MachineGroup], connected: bool, cycles: dict[str, CycleStatus] | None = None) -> dict:
+    """`cycles`: NewCycleTracker.update()'s result for these groups (None =
+    no group is in a New Cycle)."""
+    cycles = cycles or {}
     saved_order = [plc for group in groups for plc in _saved_order(group)]
     group_by_ip = {plc.ip: group.name for group in groups for plc in group.plcs}
+    wait_by_group = {name: c.wait_remaining_seconds for name, c in cycles.items()}
     return {
         "connected": connected,
         "timestamp": _now_iso(),
-        "groups": [group_to_dict(g) for g in groups],
-        # Derived from `groups`, so the WS broadcaster's change check
-        # (which only compares groups/connected) still covers it.
-        "next_action": select_next_action(saved_order, group_by_ip),
+        "groups": [group_to_dict(g, cycles.get(g.name)) for g in groups],
+        # Derived from `groups` (which carry new_cycle/wait_remaining_seconds
+        # too), so the WS broadcaster's change check still covers it.
+        "next_action": select_next_action(saved_order, group_by_ip, wait_by_group),
     }

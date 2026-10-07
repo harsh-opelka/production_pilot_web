@@ -27,7 +27,7 @@ registerHooks({
 
 const { describeNextAction } = await import('../src/lib/nextAction.js');
 const { translate } = await import('../src/lib/translations.js');
-const { formatTemperature, formatRecipe, heatingFillLevel, stateLabel } = await import('../src/lib/format.js');
+const { formatTemperature, formatRecipe, heatingFillLevel, stateLabel, formatCountdown } = await import('../src/lib/format.js');
 
 let allPassed = true;
 
@@ -53,6 +53,7 @@ function checkAction(label, nextAction, expected) {
       text,
       ip: expected.ip,
       nothingToDo: expected.nothingToDo ?? false,
+      next: null,
     });
   }
 }
@@ -84,7 +85,22 @@ checkAction('Almost finished -> Unload Soon', pick('unload_soon', 4), {
   ip: '10.0.0.4',
 });
 check('result has no colour/tier field any more',
-  Object.keys(describeNextAction(pick('error', 1), 'en')).sort(), ['action', 'ip', 'nothingToDo', 'text', 'unit']);
+  Object.keys(describeNextAction(pick('error', 1), 'en')).sort(), ['action', 'ip', 'next', 'nothingToDo', 'text', 'unit']);
+
+// New Cycle start delay (backend new_cycle.py): "Wait m:ss" in place of
+// Load Machine, counted down locally from the server's remaining seconds,
+// no machine number and no NEXT badge (ip null).
+const wait = (seconds, next = 2) => ({ kind: 'wait', ip: null, unit_number: null, wait_remaining_seconds: seconds, next_unit_number: next });
+check('Wait: full delay shows 2:00 (en)', describeNextAction(wait(120), 'en'),
+  { unit: null, action: 'Wait 2:00', text: 'Wait 2:00', ip: null, nothingToDo: false, next: 'Next: Machine 2' });
+check('Wait: German "Warten 1:34" + "Nächste: Maschine 2"',
+  [describeNextAction(wait(94), 'de').action, describeNextAction(wait(94), 'de').next], ['Warten 1:34', 'Nächste: Maschine 2']);
+check('Wait: counts down between server messages (120 s - 26.4 s elapsed -> 1:34)',
+  describeNextAction(wait(120), 'en', 26.4).action, 'Wait 1:34');
+check('Wait: never below 0:00 while waiting for the next server message',
+  describeNextAction(wait(3), 'en', 10).action, 'Wait 0:00');
+check('Wait: no NEXT badge (ip null)', describeNextAction(wait(50, 3), 'en').ip, null);
+check('countdown format: 3600 s -> 60:00, 9 s -> 0:09', [formatCountdown(3600), formatCountdown(9)], ['60:00', '0:09']);
 // e.g. all baking, or 1-3 Waiting while 4 in the same group is Heating.
 checkAction('Nothing to do right now -> smiley flag, no NEXT badge', { kind: 'nothing_to_do', ip: null, unit_number: null }, {
   text: { en: '–', de: '–' },

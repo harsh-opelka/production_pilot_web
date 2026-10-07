@@ -15,6 +15,10 @@ function applyState(data) {
     groups: data.groups,
     // The backend's Next Action pick (priority.select_next_action) — see nextAction.js.
     next_action: data.next_action,
+    // Local time this payload arrived: server-computed countdowns (the New
+    // Cycle "Wait m:ss") count down from here between messages — only the
+    // elapsed time is taken from this browser's clock, never the value.
+    received_at: Date.now(),
   });
   // Service changed the state colours -> pick them up without a reload (the TV).
   syncStateColors(data.colors_version);

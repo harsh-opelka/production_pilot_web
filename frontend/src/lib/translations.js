@@ -28,6 +28,10 @@ const en = {
   next_action_switch_to_auto: 'Switch to Auto',
   next_action_load: 'Load Machine',
   next_action_near_completion: 'Unload Soon',
+  // New Cycle start delay (backend new_cycle.py): replaces "Load Machine"
+  // while the operator waits after starting a machine. {time} = m:ss.
+  next_action_wait: 'Wait {time}',
+  next_action_wait_next: 'Next: Machine {unit}',
   // Screen-reader text for the smiley shown when there's nothing to do
   // right now (all baking, or Waiting machines held back by Heating).
   next_action_nothing_to_do: 'Nothing to do right now',
@@ -243,6 +247,19 @@ const en = {
   service_layout_reset_done: 'Layout reset — the dashboard uses the stacked layout again.',
   service_layout_unsaved: 'Unsaved changes',
   service_section_display: 'Display',
+  service_new_cycle_heading: 'New cycle start delay',
+  service_new_cycle_help:
+    'Time the operator waits after starting a machine before the next machine is asked for at the beginning of a new cycle.',
+  service_new_cycle_label: 'Delay',
+  service_new_cycle_unit: 'seconds',
+  service_new_cycle_invalid: 'Enter a whole number of seconds between {min} and {max}.',
+  service_new_cycle_saved: 'Delay saved — applies to the next start delay.',
+  service_new_cycle_status: 'Live status',
+  service_new_cycle_on: 'New cycle: on',
+  service_new_cycle_off: 'New cycle: off',
+  service_new_cycle_waiting: 'wait {time}',
+  service_demo_all_waiting: 'All Waiting',
+  service_demo_all_waiting_title: 'Set every machine of this group to Waiting (starts a new cycle)',
   service_colors_heading: 'State colors',
   service_colors_help:
     'Colours of the machine states on the dashboard, legend, list view and Statistics — the same in light and dark theme. The text colour (white or dark) is chosen automatically. After Save, every open dashboard picks up the new colours within a few seconds.',
@@ -310,6 +327,8 @@ const de = {
   next_action_load: 'Beladen',
   next_action_switch_to_auto: 'Auf Auto stellen',
   next_action_near_completion: 'Bald entladen',
+  next_action_wait: 'Warten {time}',
+  next_action_wait_next: 'Nächste: Maschine {unit}',
   next_action_nothing_to_do: 'Gerade nichts zu tun',
   tile_next_badge: 'Nächste',
   state_hot: 'Heiß',
@@ -468,6 +487,19 @@ const de = {
   service_layout_reset_done: 'Layout zurückgesetzt — das Dashboard zeigt wieder die gestapelte Ansicht.',
   service_layout_unsaved: 'Ungespeicherte Änderungen',
   service_section_display: 'Anzeige',
+  service_new_cycle_heading: 'Startverzögerung neuer Zyklus',
+  service_new_cycle_help:
+    'Wartezeit nach dem Start einer Maschine, bevor zu Beginn eines neuen Zyklus die nächste Maschine angefordert wird.',
+  service_new_cycle_label: 'Verzögerung',
+  service_new_cycle_unit: 'Sekunden',
+  service_new_cycle_invalid: 'Ganze Sekunden zwischen {min} und {max} eingeben.',
+  service_new_cycle_saved: 'Verzögerung gespeichert — gilt ab der nächsten Startverzögerung.',
+  service_new_cycle_status: 'Live-Status',
+  service_new_cycle_on: 'Neuer Zyklus: an',
+  service_new_cycle_off: 'Neuer Zyklus: aus',
+  service_new_cycle_waiting: 'warten {time}',
+  service_demo_all_waiting: 'Alle auf Warte',
+  service_demo_all_waiting_title: 'Alle Maschinen dieser Gruppe auf Warte setzen (startet einen neuen Zyklus)',
   service_colors_heading: 'Statusfarben',
   service_colors_help:
     'Farben der Maschinenzustände im Dashboard, in der Legende, der Listenansicht und der Statistik — im hellen und dunklen Design gleich. Die Textfarbe (weiß oder dunkel) wird automatisch gewählt. Nach dem Speichern übernehmen alle offenen Dashboards die neuen Farben innerhalb weniger Sekunden.',

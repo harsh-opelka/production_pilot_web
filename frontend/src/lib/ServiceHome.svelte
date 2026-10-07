@@ -6,6 +6,7 @@
   import RecordingCard from './RecordingCard.svelte';
   import ProductivityTargetCard from './ProductivityTargetCard.svelte';
   import HotColdThresholdCard from './HotColdThresholdCard.svelte';
+  import NewCycleDelayCard from './NewCycleDelayCard.svelte';
   import DataSourceCard from './DataSourceCard.svelte';
   import InstallWizard from './InstallWizard.svelte';
   import FloorLayoutEditor from './FloorLayoutEditor.svelte';
@@ -68,6 +69,10 @@
 
       <div class="card">
         <HotColdThresholdCard />
+      </div>
+
+      <div class="card">
+        <NewCycleDelayCard />
       </div>
     </div>
   </section>

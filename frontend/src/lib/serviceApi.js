@@ -178,6 +178,18 @@ export function getProductivityTarget() {
   return serviceFetch('/api/service/productivity-target');
 }
 
+// New Cycle start delay — GET is open (like the Hot/Cold threshold), PUT Service-only.
+export function getNewCycleDelay() {
+  return serviceFetch('/api/service/new-cycle-delay');
+}
+
+export function setNewCycleDelay(delaySeconds) {
+  return serviceFetch('/api/service/new-cycle-delay', {
+    method: 'PUT',
+    body: JSON.stringify({ delay_seconds: delaySeconds }),
+  });
+}
+
 export function getHotColdThreshold() {
   return serviceFetch('/api/service/hot-cold-threshold');
 }

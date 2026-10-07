@@ -34,7 +34,9 @@ from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request, Resp
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from production_pilot import exports, history, hot_cold, layout, plc_config, scan_plcs, service_config, state_colors, stats
+from production_pilot import (
+    exports, history, hot_cold, layout, new_cycle, plc_config, scan_plcs, service_config, state_colors, stats,
+)
 from production_pilot.demo_source import RECIPE_OPTIONS, SimulatedSource
 from production_pilot.models import MachineGroup
 from production_pilot.opcua_source import CONFIG_PATH, PLC_STATE_MAP, OpcUaSource
@@ -277,12 +279,20 @@ def _detect_and_log_transitions(groups: list[MachineGroup]) -> None:
 _hot_cold_rule = hot_cold.HotColdRule()
 
 
-def _process_poll(groups: list[MachineGroup]) -> list[MachineGroup]:
+# New Cycle start sequence per group (see production_pilot/new_cycle.py) —
+# runtime state only, recomputed from scratch after a restart. Poll thread only.
+_new_cycle_tracker = new_cycle.NewCycleTracker()
+
+
+def _process_poll(groups: list[MachineGroup]) -> tuple[list[MachineGroup], dict]:
     """One poll's raw source groups -> the derived groups everything else
-    sees: Standby Cold/Hot rule first, then transition detection/history logging."""
+    sees: Standby Cold/Hot rule first, then transition detection/history
+    logging, then the New Cycle tracker (on the derived states). Returns
+    (groups, {group name: new_cycle.CycleStatus})."""
     groups = _hot_cold_rule.apply(groups, history.get_hot_cold_threshold_c())
     _detect_and_log_transitions(groups)
-    return groups
+    cycles = _new_cycle_tracker.update(groups, history.get_new_cycle_delay_seconds())
+    return groups, cycles
 
 
 def _poll_loop() -> None:
@@ -304,9 +314,9 @@ def _poll_loop() -> None:
             _set_state({**_EMPTY_STATE, "timestamp": _now_iso()})
         else:
             try:
-                groups = _process_poll(source.get_machines())
+                groups, cycles = _process_poll(source.get_machines())
                 connected = source.is_connected()
-                _set_state(build_state(groups, connected))
+                _set_state(build_state(groups, connected, cycles))
             except Exception as exc:
                 print(f"[poll] cycle failed: {exc}")
                 _set_state({**_EMPTY_STATE, "timestamp": _now_iso()})
@@ -552,6 +562,12 @@ class DataSourceIn(BaseModel):
 
 class ProductivityTargetIn(BaseModel):
     target_pct: int
+
+
+class NewCycleDelayIn(BaseModel):
+    # Any, not int: a missing/non-numeric value must reach
+    # new_cycle.validate_delay's clear message, not pydantic's 422.
+    delay_seconds: Any = None
 
 
 class HotColdThresholdIn(BaseModel):
@@ -995,6 +1011,31 @@ def service_set_productivity_target(
         raise HTTPException(status_code=400, detail="target_pct must be between 0 and 100")
     history.set_productivity_target_pct(body.target_pct)
     return {"target_pct": body.target_pct}
+
+
+@app.get("/api/service/new-cycle-delay")
+def service_get_new_cycle_delay() -> dict:
+    """Readable by every level (no session needed, like the Hot/Cold
+    threshold) — the poll loop itself reads the cached value directly."""
+    return {
+        "delay_seconds": history.get_new_cycle_delay_seconds(),
+        "min_seconds": new_cycle.MIN_DELAY_SECONDS,
+        "max_seconds": new_cycle.MAX_DELAY_SECONDS,
+    }
+
+
+@app.put("/api/service/new-cycle-delay")
+def service_set_new_cycle_delay(
+    body: NewCycleDelayIn, _token: str = Depends(require_level("service"))
+) -> dict:
+    """Applies to the next start delay; a countdown already running keeps
+    the value it started with (see new_cycle.NewCycleTracker.update)."""
+    try:
+        delay_seconds = new_cycle.validate_delay(body.delay_seconds)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    history.set_new_cycle_delay_seconds(delay_seconds)
+    return service_get_new_cycle_delay()
 
 
 @app.get("/api/service/hot-cold-threshold")

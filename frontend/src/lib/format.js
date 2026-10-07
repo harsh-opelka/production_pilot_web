@@ -7,6 +7,12 @@ import { translate } from './translations.js';
 // Abbreviations are deliberately period-free (translations.js/
 // translations_de.json's duration_ms_format/duration_hm_format) — not
 // "Min." / "Sek." / "Std." — per spec.
+/** Countdown as "m:ss" — 120 -> "2:00", 94 -> "1:34", 3600 -> "60:00". */
+export function formatCountdown(seconds) {
+  const s = Math.max(0, Math.ceil(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
 export function formatDuration(seconds, language) {
   const total = Math.max(0, Math.floor(seconds ?? 0));
   if (total >= 3600) {

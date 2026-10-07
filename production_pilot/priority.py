@@ -27,6 +27,7 @@ LOAD_BLOCKED_WHILE_GROUP_HEATING = True
 ACTION_ERROR = "error"                  # "<no>: Check Error"
 ACTION_SWITCH_TO_AUTO = "switch_to_auto"  # "<no>: Switch to Auto" (Standby: shown as Cold, Hot or Standby)
 ACTION_LOAD = "load"                    # "<no>: Load Machine"   (WAITING)
+ACTION_WAIT = "wait"                    # "Wait m:ss" — New Cycle start delay (new_cycle.py), in place of Load
 ACTION_UNLOAD_SOON = "unload_soon"      # "<no>: Unload Soon"    (Almost finished)
 # Nothing actionable:
 ACTION_NOTHING_TO_DO = "nothing_to_do"  # machines online, nothing to do right now -> smiley
@@ -76,7 +77,11 @@ _TIERS = (
 )
 
 
-def select_next_action(plcs: list[PlcData], group_by_ip: dict[str, str] | None = None) -> dict:
+def select_next_action(
+    plcs: list[PlcData],
+    group_by_ip: dict[str, str] | None = None,
+    wait_by_group: dict[str, int | None] | None = None,
+) -> dict:
     """
     `plcs` must be in saved priority order: groups in plc_config.json
     order, each group's PLCs in their saved order (default_priority).
@@ -92,6 +97,16 @@ def select_next_action(plcs: list[PlcData], group_by_ip: dict[str, str] | None =
 
     LOAD_BLOCKED_WHILE_GROUP_HEATING: a Waiting machine whose group has an
     online Heating machine is skipped, as if it had nothing to do.
+
+    New Cycle (new_cycle.py): `wait_by_group` maps a group name to the
+    seconds left of its running start delay (None/missing = no delay).
+    A Waiting machine in such a group is not loadable yet. In the Waiting
+    tier a loadable machine (any group, saved order) wins; if there is
+    none but a delayed group has a Waiting machine, the result is
+    ACTION_WAIT: {"kind": "wait", "ip": None, "unit_number": None,
+    "wait_remaining_seconds": n, "next_unit_number": <the machine asked
+    for next, saved order>}. ip None = no NEXT badge. So Wait loses to
+    Error and Switch to Auto and beats Unload Soon.
 
     Returns {"kind", "ip", "unit_number"}. When nothing is actionable,
     kind is ACTION_NOTHING_TO_DO (the smiley banner) if at least one
@@ -109,11 +124,19 @@ def select_next_action(plcs: list[PlcData], group_by_ip: dict[str, str] | None =
             return None
         return kind
 
+    def delay_of(plc: PlcData) -> int | None:
+        return (wait_by_group or {}).get(group_of(plc)) or None
+
     kinds = [(plc, kind_of(plc)) for plc in plcs]
     for tier in _TIERS:
         for plc, kind in kinds:
-            if kind in tier:
+            if kind in tier and not (kind == ACTION_LOAD and delay_of(plc)):
                 return {"kind": kind, "ip": plc.ip, "unit_number": plc.unit_number}
+        if tier == (ACTION_LOAD,):
+            for plc, kind in kinds:
+                if kind == ACTION_LOAD and delay_of(plc):
+                    return {"kind": ACTION_WAIT, "ip": None, "unit_number": None,
+                            "wait_remaining_seconds": delay_of(plc), "next_unit_number": plc.unit_number}
 
     if any(plc.is_online for plc in plcs):
         return {"kind": ACTION_NOTHING_TO_DO, "ip": None, "unit_number": None}

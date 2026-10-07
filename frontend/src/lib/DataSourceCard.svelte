@@ -100,6 +100,14 @@
     updatePlc(groupName, ip, { state: value });
   }
 
+  // Demo of the New Cycle start sequence: every machine of the group to
+  // Waiting at once (then set machine 1 to Baking and watch the countdown).
+  async function setAllWaiting(group) {
+    for (const plc of group.plcs) {
+      if (plc.state !== 'WAITING') await updatePlc(group.name, plc.ip, { state: 'WAITING' });
+    }
+  }
+
   function onOnlineChange(groupName, ip, checked) {
     updatePlc(groupName, ip, { is_online: checked });
   }
@@ -154,7 +162,17 @@
     <h3>{translate($lang, 'service_demo_controls_heading')}</h3>
     {#each groups as group (group.name)}
       <div class="demo-group">
-        <p class="demo-group-name">{group.name} <span class="demo-group-type">({group.type})</span></p>
+        <p class="demo-group-name">
+          {group.name} <span class="demo-group-type">({group.type})</span>
+          <button
+            type="button"
+            class="all-waiting"
+            title={translate($lang, 'service_demo_all_waiting_title')}
+            onclick={() => setAllWaiting(group)}
+          >
+            {translate($lang, 'service_demo_all_waiting')}
+          </button>
+        </p>
         <div class="demo-table">
           <div class="demo-row demo-row-head">
             <span>{translate($lang, 'service_demo_unit_col')}</span>
@@ -282,6 +300,19 @@
     color: var(--text-primary);
     font-weight: 600;
     overflow-wrap: break-word;
+  }
+
+  .all-waiting {
+    margin-left: 0.6rem;
+    padding: 0.15rem 0.6rem;
+    font: inherit;
+    font-size: 0.85em;
+    font-weight: 600;
+    color: var(--text-primary);
+    background: var(--bg-app);
+    border: 1px solid var(--border-color);
+    border-radius: 0.35rem;
+    cursor: pointer;
   }
 
   .demo-group-type {

@@ -40,6 +40,8 @@ _DEFAULT_PRODUCTIVITY_TARGET_PCT = "70"
 _FLOOR_LAYOUT_KEY = "floor_layout"
 _HOT_COLD_THRESHOLD_KEY = "hot_cold_threshold_c"
 _STATE_COLORS_KEY = "state_colors"
+_NEW_CYCLE_DELAY_KEY = "new_cycle_delay_seconds"
+_DEFAULT_NEW_CYCLE_DELAY_SECONDS = "120"
 _DEFAULT_HOT_COLD_THRESHOLD_C = "50"
 _STATE_MAPPING_VERSION_KEY = "state_mapping_version"
 #: Current state-name vocabulary in state_transitions — see
@@ -72,6 +74,7 @@ _recording_enabled = False  # cache; authoritative value lives in app_settings
 _data_source_mode = _DEFAULT_DATA_SOURCE_MODE  # cache; authoritative value lives in app_settings
 _productivity_target_pct = int(_DEFAULT_PRODUCTIVITY_TARGET_PCT)  # cache; authoritative value lives in app_settings
 _hot_cold_threshold_c = float(_DEFAULT_HOT_COLD_THRESHOLD_C)  # cache; read every poll, authoritative value lives in app_settings
+_new_cycle_delay_seconds = int(_DEFAULT_NEW_CYCLE_DELAY_SECONDS)  # cache; read every poll (new_cycle.py)
 _saved_state_colors: dict | None = None  # cache of the stored state_colors JSON (None = nothing saved); read every broadcast tick
 
 # This PROCESS's own start instant (ISO UTC string, history's fixed-width
@@ -145,6 +148,7 @@ def init_db() -> None:
     (so a restart resumes whichever state the technician last set). Call
     once at startup."""
     global _recording_enabled, _data_source_mode, _productivity_target_pct, _hot_cold_threshold_c, _saved_state_colors
+    global _new_cycle_delay_seconds
     with _db_lock, _connection() as conn:
         conn.execute(
             """
@@ -184,6 +188,10 @@ def init_db() -> None:
             "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)",
             (_HOT_COLD_THRESHOLD_KEY, _DEFAULT_HOT_COLD_THRESHOLD_C),
         )
+        conn.execute(
+            "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)",
+            (_NEW_CYCLE_DELAY_KEY, _DEFAULT_NEW_CYCLE_DELAY_SECONDS),
+        )
         row = conn.execute(
             "SELECT value FROM app_settings WHERE key = ?", (_RECORDING_KEY,)
         ).fetchone()
@@ -204,6 +212,10 @@ def init_db() -> None:
             "SELECT value FROM app_settings WHERE key = ?", (_STATE_COLORS_KEY,)
         ).fetchone()
         _saved_state_colors = _parse_json_object(row["value"]) if row is not None else None
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = ?", (_NEW_CYCLE_DELAY_KEY,)
+        ).fetchone()
+        _new_cycle_delay_seconds = int(row["value"]) if row is not None else int(_DEFAULT_NEW_CYCLE_DELAY_SECONDS)
     migrate_state_mapping()
 
 
@@ -339,6 +351,27 @@ def set_hot_cold_threshold_c(threshold_c: float) -> None:
             (_HOT_COLD_THRESHOLD_KEY, repr(float(threshold_c))),
         )
     _hot_cold_threshold_c = float(threshold_c)
+
+
+def get_new_cycle_delay_seconds() -> int:
+    """In-memory cache — the poll loop reads this every ~0.5 s (see
+    new_cycle.py); a new value applies to the next delay that starts."""
+    return _new_cycle_delay_seconds
+
+
+def set_new_cycle_delay_seconds(seconds: int) -> None:
+    """Caller is expected to have already validated the value (see
+    new_cycle.validate_delay) — this always writes what it's given."""
+    global _new_cycle_delay_seconds
+    with _db_lock, _connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO app_settings (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (_NEW_CYCLE_DELAY_KEY, str(int(seconds))),
+        )
+    _new_cycle_delay_seconds = int(seconds)
 
 
 def get_saved_state_colors() -> dict | None:

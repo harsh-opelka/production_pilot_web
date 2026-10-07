@@ -1,12 +1,20 @@
 <script>
   import logo from '../assets/opelka_logo.png';
-  import { machinesState, lang, page, auth, sidebarOpen } from './stores.js';
+  import { machinesState, lang, page, auth, sidebarOpen, nowTick } from './stores.js';
   import { translate } from './translations.js';
   import { describeNextAction } from './nextAction.js';
   import AuthGate from './AuthGate.svelte';
   import KpiSummary from './KpiSummary.svelte';
 
-  let nextAction = $derived(describeNextAction($machinesState.next_action, $lang));
+  // Elapsed time since the payload arrived, so the New Cycle "Wait m:ss"
+  // counts down live between server messages (value from the server).
+  let nextAction = $derived(
+    describeNextAction(
+      $machinesState.next_action,
+      $lang,
+      $machinesState.received_at ? ($nowTick - $machinesState.received_at) / 1000 : 0,
+    ),
+  );
 
   // bind:this target for AuthGate below — the login trigger used to be a
   // standalone hamburger button (see AuthGate.svelte's history); now it's
@@ -49,6 +57,14 @@
             <circle cx="15.5" cy="9.5" r="1.5" fill="#1c1c1c" />
             <path d="M7.3 14 Q12 18.8 16.7 14" fill="none" stroke="#1c1c1c" stroke-width="1.9" stroke-linecap="round" />
           </svg>
+        </span>
+      {:else if $machinesState.next_action?.kind === 'wait'}
+        <!-- New Cycle start delay: "Wait m:ss" in place of Load Machine (no
+             number badge, no NEXT badge on any tile), plus a small "Next:
+             Machine n" on the same line so the card keeps its size. -->
+        <span class="na-content" title={nextAction.text}>
+          <span class="na-action na-countdown">{nextAction.action}</span>
+          {#if nextAction.next}<span class="na-next">{nextAction.next}</span>{/if}
         </span>
       {:else if nextAction.unit != null}
         <span class="na-content" title={nextAction.text}>
@@ -203,6 +219,23 @@
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .na-countdown {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Secondary, so it never competes with the countdown; shrinks/ellipsizes
+     before the countdown does. */
+  .na-next {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-left: 0.4em;
+    font-size: 0.45em;
+    font-weight: 600;
+    color: var(--next-label);
   }
 
   .na-smiley {
