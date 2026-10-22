@@ -1023,6 +1023,24 @@ def service_set_productivity_target(
     return {"target_pct": body.target_pct}
 
 
+class ShowTvIconIn(BaseModel):
+    show_tv_icon: bool
+
+
+@app.get("/api/service/show-tv-icon")
+def service_get_show_tv_icon() -> dict:
+    """Readable by every level — the anonymous dashboard needs it."""
+    return {"show_tv_icon": history.get_show_tv_icon()}
+
+
+@app.put("/api/service/show-tv-icon")
+def service_set_show_tv_icon(
+    body: ShowTvIconIn, _token: str = Depends(require_level("service"))
+) -> dict:
+    history.set_show_tv_icon(body.show_tv_icon)
+    return {"show_tv_icon": body.show_tv_icon}
+
+
 @app.get("/api/service/new-cycle-delay")
 def service_get_new_cycle_delay() -> dict:
     """Readable by every level (no session needed, like the Hot/Cold

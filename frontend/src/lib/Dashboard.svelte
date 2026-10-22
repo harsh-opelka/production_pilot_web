@@ -1,7 +1,7 @@
 <script>
-  import { machinesState, view, lang, auth, floorLayout } from './stores.js';
+  import { machinesState, view, lang, auth, floorLayout, showTvIcon } from './stores.js';
   import { todayLocalDate } from './format.js';
-  import { getDailySummary, getLayout } from './serviceApi.js';
+  import { getDailySummary, getLayout, getShowTvIcon } from './serviceApi.js';
   import { describeNextAction } from './nextAction.js';
   import { translate } from './translations.js';
   import { TV_SIZE_PX, placeInArea, stackedTileWidth } from './floorLayout.js';
@@ -40,6 +40,7 @@
   async function loadLayout() {
     try {
       floorLayout.set(await getLayout());
+      showTvIcon.set(await getShowTvIcon());
     } catch {
       // Non-fatal — keep the last known layout (or the stacked fallback).
     }
@@ -70,7 +71,7 @@
   let stacked = $derived(
     $view === 'block' ? $machinesState.groups.filter((g) => !savedGroups[g.name]) : $machinesState.groups,
   );
-  let savedTvs = $derived($view === 'block' && placedGroups.length ? ($floorLayout?.tvs ?? []) : []);
+  let savedTvs = $derived($view === 'block' && $showTvIcon && placedGroups.length ?($floorLayout?.tvs ?? []) : []);
 
   let areaW = $state(0);
   let areaH = $state(0);

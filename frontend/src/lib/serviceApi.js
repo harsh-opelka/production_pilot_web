@@ -216,6 +216,20 @@ export async function getLayout() {
   return res.json();
 }
 
+// Show/hide the TV icons on the dashboard — readable without a session.
+export async function getShowTvIcon() {
+  const res = await fetch('/api/service/show-tv-icon');
+  if (!res.ok) throw new ServiceApiError(`Request failed (${res.status})`, res.status);
+  return (await res.json()).show_tv_icon;
+}
+
+export function setShowTvIcon(show) {
+  return serviceFetch('/api/service/show-tv-icon', {
+    method: 'PUT',
+    body: JSON.stringify({ show_tv_icon: show }),
+  });
+}
+
 // Customer Demo Mode: chunked upload while recording. startDemoUpload()
 // opens a session on the server (checks free disk space), each
 // MediaRecorder chunk is PUT at its byte offset (a retried chunk that

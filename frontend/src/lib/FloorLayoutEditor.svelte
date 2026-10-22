@@ -7,9 +7,9 @@
   // (floorLayout.naturalGroupSize), so overlaps seen here are real. Reset
   // to default clears the saved layout (dashboard goes back to stacked).
   import { onMount } from 'svelte';
-  import { lang, machinesState, floorLayout } from './stores.js';
+  import { lang, machinesState, floorLayout, showTvIcon } from './stores.js';
   import { translate } from './translations.js';
-  import { getLayout, saveLayout, ServiceApiError } from './serviceApi.js';
+  import { getLayout, saveLayout, getShowTvIcon, setShowTvIcon, ServiceApiError } from './serviceApi.js';
   import {
     REFERENCE_AREA,
     REFERENCE_VIEWPORT,
@@ -32,6 +32,25 @@
   let busy = $state(false);
   let message = $state('');
   let error = $state('');
+
+  let showTv = $derived($showTvIcon);
+
+  async function toggleShowTv(event) {
+    const want = event.currentTarget.checked;
+    busy = true;
+    error = '';
+    try {
+      await setShowTvIcon(want);
+      showTvIcon.set(want);
+    } catch (err) {
+      event.currentTarget.checked = !want;
+      error = translate($lang, 'service_layout_error', {
+        error: err instanceof ServiceApiError ? err.message : String(err),
+      });
+    } finally {
+      busy = false;
+    }
+  }
 
   let canvasEl = $state();
   let canvasW = $state(0);
@@ -69,7 +88,7 @@
       const size = blockSize(g.name, p.orientation);
       return { label: g.name, left: p.x, top: p.y, w: size.w, h: size.h };
     }),
-    ...tvs.map((tv, i) => ({ label: `${translate($lang, 'service_layout_tv')} ${i + 1}`, left: tv.x, top: tv.y, ...tvSize() })),
+    ...(showTv ? tvs : []).map((tv, i) => ({ label: `${translate($lang, 'service_layout_tv')} ${i + 1}`, left: tv.x, top: tv.y, ...tvSize() })),
   ]);
   let overlaps = $derived(loaded ? findOverlaps(rects) : []);
   let tooBig = $derived(loaded ? rects.filter((r) => r.w > 100 || r.h > 100).map((r) => r.label) : []);
@@ -84,6 +103,7 @@
   onMount(async () => {
     try {
       apply(await getLayout());
+      showTvIcon.set(await getShowTvIcon());
     } catch (err) {
       error = err instanceof ServiceApiError ? err.message : String(err);
     } finally {
@@ -218,7 +238,7 @@
     style="aspect-ratio: {REFERENCE_AREA.w} / {REFERENCE_AREA.h}; --ed-gap: {REF_TILE.gap * scale}px; --ed-header: {REF_HEADER * scale}px; --ed-font-header: {REF_HEADER * scale * 0.45}px; --ed-font-unit: {REF_TILE.h * scale * 0.3}px;"
   >
     {#if loaded}
-      {#each tvs as tv, i (i)}
+      {#each showTv ? tvs : [] as tv, i (i)}
         {@const size = tvSize()}
         <div
           class="item tv"
@@ -316,8 +336,16 @@
     {/each}
   </div>
 
+  <label class="tv-toggle">
+    <input type="checkbox" checked={showTv} disabled={!loaded || busy} onchange={toggleShowTv} />
+    {translate($lang, 'service_layout_show_tv')}
+  </label>
+  {#if !showTv}
+    <p class="hint">{translate($lang, 'service_layout_tv_hidden_hint')}</p>
+  {/if}
+
   <div class="actions">
-    <button type="button" class="secondary" disabled={!loaded || busy} onclick={addTv}>
+    <button type="button" class="secondary" disabled={!loaded || busy || !showTv} onclick={addTv}>
       + {translate($lang, 'service_layout_add_tv')}
     </button>
     <span class="spacer"></span>
@@ -435,6 +463,15 @@
 
   .tv {
     color: var(--text-secondary);
+  }
+
+  .tv-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.75rem 0 0.25rem;
+    font-size: var(--font-toggle);
+    color: var(--text-primary);
   }
 
   .remove-tv {

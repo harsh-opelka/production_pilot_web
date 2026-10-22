@@ -42,6 +42,7 @@ _HOT_COLD_THRESHOLD_KEY = "hot_cold_threshold_c"
 _STATE_COLORS_KEY = "state_colors"
 _NEW_CYCLE_DELAY_KEY = "new_cycle_delay_seconds"
 _DEMO_BUTTON_FOR_ALL_KEY = "demo_button_for_all"
+_SHOW_TV_ICON_KEY = "show_tv_icon"
 _DEFAULT_NEW_CYCLE_DELAY_SECONDS = "120"
 _DEFAULT_HOT_COLD_THRESHOLD_C = "50"
 _STATE_MAPPING_VERSION_KEY = "state_mapping_version"
@@ -372,6 +373,27 @@ def set_demo_button_for_all(enabled: bool) -> None:
             ON CONFLICT(key) DO UPDATE SET value = excluded.value
             """,
             (_DEMO_BUTTON_FOR_ALL_KEY, "true" if enabled else "false"),
+        )
+
+
+def get_show_tv_icon() -> bool:
+    """Floor layout: True = the dashboard draws the saved TV icons,
+    False (default) = hidden. Read on demand, no cache."""
+    with _db_lock, _connection() as conn:
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = ?", (_SHOW_TV_ICON_KEY,)
+        ).fetchone()
+    return row is not None and row["value"] == "true"
+
+
+def set_show_tv_icon(enabled: bool) -> None:
+    with _db_lock, _connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO app_settings (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (_SHOW_TV_ICON_KEY, "true" if enabled else "false"),
         )
 
 

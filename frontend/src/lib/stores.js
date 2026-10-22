@@ -82,6 +82,10 @@ export const statsHiddenColumns = persisted('pp_stats_hidden_columns', []);
 // shows the change immediately.
 export const floorLayout = writable(null);
 
+// Service "Show TV icon on the main screen" — hidden by default. Refreshed
+// with the layout by Dashboard.svelte; the editor sets it after a toggle.
+export const showTvIcon = writable(false);
+
 // Set by a Service section with unsaved changes (StateColorsCard.svelte)
 // to the confirmation text shown before leaving the page; null = nothing
 // unsaved. navigateTo()/confirmLeave() are what the sidebar uses.
